@@ -1,36 +1,43 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { LANGUAGES, COUNTRIES } from '@/lib/localization';
-import { toast } from 'react-hot-toast';
+import { useState, useEffect } from "react";
+import { LANGUAGES, COUNTRIES } from "@/lib/localization";
+import { toast } from "react-hot-toast";
+import CompanyForm from "@/components/CompanyForm";
 
 export default function Home() {
-  const [keyword, setKeyword] = useState('');
-  const [title, setTitle] = useState('');
+  const [keyword, setKeyword] = useState("");
+  const [title, setTitle] = useState("");
   const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
-  const [newKeyword, setNewKeyword] = useState('');
+  const [newKeyword, setNewKeyword] = useState("");
   const [outline, setOutline] = useState<string[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [streamedContent, setStreamedContent] = useState('');
-  const [currentSection, setCurrentSection] = useState('');
+  const [streamedContent, setStreamedContent] = useState("");
+  const [currentSection, setCurrentSection] = useState("");
   const [wordCount, setWordCount] = useState(0);
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
-  const [sampleText, setSampleText] = useState('');
-  const [tone, setTone] = useState({ 
-    detailedAnalysis: '',
-    tone: '', 
-    style: '', 
-    voice: '',
-    language: '',
-    engagement: ''
+  const [sampleText, setSampleText] = useState("");
+  const [tone, setTone] = useState({
+    detailedAnalysis: "",
+    tone: "",
+    style: "",
+    voice: "",
+    language: "",
+    engagement: "",
   });
   const [isAnalyzingTone, setIsAnalyzingTone] = useState(false);
-  const [language, setLanguage] = useState('en-US');
-  const [targetCountry, setTargetCountry] = useState('US');
+  const [language, setLanguage] = useState("en-US");
+  const [targetCountry, setTargetCountry] = useState("US");
   const [showCopied, setShowCopied] = useState(false);
+  const [companyInfo, setCompanyInfo] = useState({
+    name: "",
+    website: "",
+    description: "",
+    summary: "",
+  });
 
   useEffect(() => {
     const words = streamedContent.trim().split(/\s+/).length;
@@ -41,9 +48,9 @@ export default function Home() {
     if (!keyword) return;
     setIsGeneratingKeywords(true);
     try {
-      const response = await fetch('/api/keywords', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword, title }),
       });
       const data = await response.json();
@@ -51,7 +58,7 @@ export default function Home() {
         setRelatedKeywords(data.keywords);
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error("Error:", error);
     }
     setIsGeneratingKeywords(false);
   };
@@ -59,13 +66,15 @@ export default function Home() {
   const handleAddKeyword = (e: React.FormEvent) => {
     e.preventDefault();
     if (newKeyword.trim()) {
-      setRelatedKeywords(prev => [...prev, newKeyword.trim()]);
-      setNewKeyword('');
+      setRelatedKeywords((prev) => [...prev, newKeyword.trim()]);
+      setNewKeyword("");
     }
   };
 
   const removeKeyword = (indexToRemove: number) => {
-    setRelatedKeywords(prev => prev.filter((_, index) => index !== indexToRemove));
+    setRelatedKeywords((prev) =>
+      prev.filter((_, index) => index !== indexToRemove)
+    );
   };
 
   const handleKeywordSubmit = async (e: React.FormEvent) => {
@@ -77,18 +86,18 @@ export default function Home() {
   const handleOutlineGeneration = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/outline', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/outline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword, title, language, targetCountry }),
       });
       const data = await response.json();
       if (data.outline) {
-        console.log('Received outline:', data.outline);
+        console.log("Received outline:", data.outline);
         setOutline(data.outline);
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error("Error:", error);
     }
     setIsLoading(false);
   };
@@ -97,9 +106,9 @@ export default function Home() {
     if (!keyword) return;
     setIsGeneratingTitle(true);
     try {
-      const response = await fetch('/api/title', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword, language, targetCountry }),
       });
       const data = await response.json();
@@ -107,7 +116,7 @@ export default function Home() {
         setTitle(data.title);
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error("Error:", error);
     }
     setIsGeneratingTitle(false);
   };
@@ -115,15 +124,15 @@ export default function Home() {
   const handleContentGeneration = async () => {
     setStep(3);
     setIsLoading(true);
-    setStreamedContent('');
+    setStreamedContent("");
     setWordCount(0);
-    setCurrentSection('');
+    setCurrentSection("");
 
     try {
-      const response = await fetch('/api/content', {
-        method: 'POST',
+      const response = await fetch("/api/content", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           keyword,
@@ -132,35 +141,39 @@ export default function Home() {
           relatedKeywords,
           tone,
           language,
-          targetCountry
+          targetCountry,
+          companyInfo,
         }),
       });
 
-      if (!response.ok) throw new Error('Network response was not ok');
+      if (!response.ok) throw new Error("Network response was not ok");
       const reader = response.body?.getReader();
-      if (!reader) throw new Error('No reader available');
+      if (!reader) throw new Error("No reader available");
 
       setStep(4);
-      
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         const text = new TextDecoder().decode(value);
-        const lines = text.split('\n');
+        const lines = text.split("\n");
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
+          if (line.startsWith("data: ")) {
             const data = line.slice(5);
-            if (data === '[DONE]') break;
+            if (data === "[DONE]") break;
 
             try {
               const parsed = JSON.parse(data);
               if (parsed.content) {
-                setStreamedContent(prev => {
+                setStreamedContent((prev) => {
                   const newContent = prev + parsed.content;
                   // Count words in the new content
-                  const words = newContent.replace(/<[^>]*>/g, '').trim().split(/\s+/).length;
+                  const words = newContent
+                    .replace(/<[^>]*>/g, "")
+                    .trim()
+                    .split(/\s+/).length;
                   setWordCount(words);
                   return newContent;
                 });
@@ -169,13 +182,13 @@ export default function Home() {
                 setCurrentSection(parsed.section);
               }
             } catch (e) {
-              console.error('Error parsing JSON:', e);
+              console.error("Error parsing JSON:", e);
             }
           }
         }
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error("Error:", error);
     }
     setIsLoading(false);
   };
@@ -184,9 +197,9 @@ export default function Home() {
     if (!sampleText.trim()) return;
     setIsAnalyzingTone(true);
     try {
-      const response = await fetch('/api/tone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/tone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sampleText }),
       });
       const data = await response.json();
@@ -194,7 +207,7 @@ export default function Home() {
         setTone(data);
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error("Error:", error);
     }
     setIsAnalyzingTone(false);
   };
@@ -203,10 +216,10 @@ export default function Home() {
     try {
       await navigator.clipboard.writeText(streamedContent);
       setShowCopied(true);
-      toast.success('Content copied to clipboard!');
+      toast.success("Content copied to clipboard!");
       setTimeout(() => setShowCopied(false), 2000);
     } catch (err) {
-      toast.error('Failed to copy content');
+      toast.error("Failed to copy content");
     }
   };
 
@@ -217,7 +230,7 @@ export default function Home() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title || 'Generated Content'}</title>
+    <title>${title || "Generated Content"}</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -240,24 +253,44 @@ export default function Home() {
 </body>
 </html>`;
 
-    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const blob = new Blob([htmlContent], { type: "text/html" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `${title || 'generated-content'}.html`;
+    a.download = `${title || "generated-content"}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast.success('Content exported as HTML!');
+    toast.success("Content exported as HTML!");
+  };
+
+  const handleCompanyFormComplete = (info: {
+    name: string;
+    website: string;
+    description: string;
+    summary: string;
+  }) => {
+    setCompanyInfo(info);
+    console.log("INFO:", info);
+    setStep(1);
   };
 
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-5xl mx-auto">
-      <h1 className="text-4xl md:text-5xl font-bold mb-8 text-center bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-        AI Content Generator
-      </h1>
-      
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-4xl md:text-5xl font-bold text-center bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+          AI Content Generator
+        </h1>
+
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-gray-600">Welcome</span>
+          <a href="/api/auth/logout" className="btn-secondary text-sm">
+            Logout
+          </a>
+        </div>
+      </div>
+
       {isLoading && step !== 4 && (
         <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="card p-6 flex items-center gap-3">
@@ -266,10 +299,24 @@ export default function Home() {
           </div>
         </div>
       )}
-      
+
+      {step === 0 && (
+        <div className="card p-6">
+          <CompanyForm onComplete={handleCompanyFormComplete} />
+        </div>
+      )}
+
       {step === 1 && (
         <div className="card p-6 space-y-6">
-          <h2 className="text-2xl font-semibold">Content Details</h2>
+          <div className="flex justify-between items-center">
+            <h2 className="text-2xl font-semibold">Content Details</h2>
+            <button
+              onClick={() => setStep(0)}
+              className="btn-secondary text-sm"
+            >
+              ← Back to Company Info
+            </button>
+          </div>
           <form onSubmit={handleKeywordSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-medium mb-2 text-[var(--secondary)]">
@@ -296,7 +343,7 @@ export default function Home() {
                   className="input-field"
                   required
                 >
-                  {LANGUAGES.map(lang => (
+                  {LANGUAGES.map((lang) => (
                     <option key={lang.code} value={lang.code}>
                       {lang.name}
                     </option>
@@ -314,7 +361,7 @@ export default function Home() {
                   className="input-field"
                   required
                 >
-                  {COUNTRIES.map(country => (
+                  {COUNTRIES.map((country) => (
                     <option key={country.code} value={country.code}>
                       {country.name}
                     </option>
@@ -325,7 +372,10 @@ export default function Home() {
 
             <div>
               <label className="block text-sm font-medium mb-2 text-[var(--secondary)]">
-                Title {title && <span className="text-[var(--primary)]">(AI Generated)</span>}
+                Title{" "}
+                {title && (
+                  <span className="text-[var(--primary)]">(AI Generated)</span>
+                )}
               </label>
               <div className="flex gap-3">
                 <input
@@ -345,7 +395,7 @@ export default function Home() {
                   {isGeneratingTitle ? (
                     <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
                   ) : (
-                    'Generate'
+                    "Generate"
                   )}
                 </button>
               </div>
@@ -372,7 +422,7 @@ export default function Home() {
                     {isAnalyzingTone ? (
                       <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     ) : (
-                      'Analyze Writing Style'
+                      "Analyze Writing Style"
                     )}
                   </button>
                   {tone.tone && (
@@ -380,23 +430,39 @@ export default function Home() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <h3 className="font-semibold mb-1">Overall Tone</h3>
-                          <p className="text-[var(--secondary)] whitespace-pre-wrap">{tone.tone}</p>
+                          <p className="text-[var(--secondary)] whitespace-pre-wrap">
+                            {tone.tone}
+                          </p>
                         </div>
                         <div>
                           <h3 className="font-semibold mb-1">Writing Style</h3>
-                          <p className="text-[var(--secondary)] whitespace-pre-wrap">{tone.style}</p>
+                          <p className="text-[var(--secondary)] whitespace-pre-wrap">
+                            {tone.style}
+                          </p>
                         </div>
                         <div>
-                          <h3 className="font-semibold mb-1">Voice Characteristics</h3>
-                          <p className="text-[var(--secondary)] whitespace-pre-wrap">{tone.voice}</p>
+                          <h3 className="font-semibold mb-1">
+                            Voice Characteristics
+                          </h3>
+                          <p className="text-[var(--secondary)] whitespace-pre-wrap">
+                            {tone.voice}
+                          </p>
                         </div>
                         <div>
-                          <h3 className="font-semibold mb-1">Language Patterns</h3>
-                          <p className="text-[var(--secondary)] whitespace-pre-wrap">{tone.language}</p>
+                          <h3 className="font-semibold mb-1">
+                            Language Patterns
+                          </h3>
+                          <p className="text-[var(--secondary)] whitespace-pre-wrap">
+                            {tone.language}
+                          </p>
                         </div>
                         <div className="md:col-span-2">
-                          <h3 className="font-semibold mb-1">Engagement Elements</h3>
-                          <p className="text-[var(--secondary)] whitespace-pre-wrap">{tone.engagement}</p>
+                          <h3 className="font-semibold mb-1">
+                            Engagement Elements
+                          </h3>
+                          <p className="text-[var(--secondary)] whitespace-pre-wrap">
+                            {tone.engagement}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -419,17 +485,14 @@ export default function Home() {
                   {isGeneratingKeywords ? (
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   ) : (
-                    'Generate Keywords'
+                    "Generate Keywords"
                   )}
                 </button>
               </div>
 
               <div className="flex flex-wrap gap-2 mb-3">
                 {relatedKeywords.map((kw, index) => (
-                  <span 
-                    key={index} 
-                    className="tag group"
-                  >
+                  <span key={index} className="tag group">
                     {kw}
                     <button
                       type="button"
@@ -450,11 +513,14 @@ export default function Home() {
                   className="input-field"
                   placeholder="Add a custom keyword"
                   onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
+                    if (e.key === "Enter") {
                       e.preventDefault();
                       if (newKeyword.trim()) {
-                        setRelatedKeywords(prev => [...prev, newKeyword.trim()]);
-                        setNewKeyword('');
+                        setRelatedKeywords((prev) => [
+                          ...prev,
+                          newKeyword.trim(),
+                        ]);
+                        setNewKeyword("");
                       }
                     }
                   }}
@@ -463,8 +529,11 @@ export default function Home() {
                   type="button"
                   onClick={() => {
                     if (newKeyword.trim()) {
-                      setRelatedKeywords(prev => [...prev, newKeyword.trim()]);
-                      setNewKeyword('');
+                      setRelatedKeywords((prev) => [
+                        ...prev,
+                        newKeyword.trim(),
+                      ]);
+                      setNewKeyword("");
                     }
                   }}
                   className="btn-primary whitespace-nowrap"
@@ -490,19 +559,19 @@ export default function Home() {
         <div className="card p-6 space-y-6">
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-semibold">Article Outline</h2>
-            <button 
-              onClick={() => setStep(1)} 
+            <button
+              onClick={() => setStep(1)}
               className="btn-secondary text-sm"
             >
               ← Back
             </button>
           </div>
-          
+
           {outline.length > 0 ? (
             <>
               <div className="space-y-3">
                 {outline.map((item, index) => (
-                  <div 
+                  <div
                     key={index}
                     className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg group"
                   >
@@ -511,7 +580,10 @@ export default function Home() {
                         <button
                           onClick={() => {
                             const newOutline = [...outline];
-                            [newOutline[index], newOutline[index - 1]] = [newOutline[index - 1], newOutline[index]];
+                            [newOutline[index], newOutline[index - 1]] = [
+                              newOutline[index - 1],
+                              newOutline[index],
+                            ];
                             setOutline(newOutline);
                           }}
                           className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--secondary)] hover:text-[var(--primary)]"
@@ -524,7 +596,10 @@ export default function Home() {
                         <button
                           onClick={() => {
                             const newOutline = [...outline];
-                            [newOutline[index], newOutline[index + 1]] = [newOutline[index + 1], newOutline[index]];
+                            [newOutline[index], newOutline[index + 1]] = [
+                              newOutline[index + 1],
+                              newOutline[index],
+                            ];
                             setOutline(newOutline);
                           }}
                           className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--secondary)] hover:text-[var(--primary)]"
@@ -548,9 +623,9 @@ export default function Home() {
                             setOutline(newOutline);
                           }}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
+                            if (e.key === "Enter") {
                               setEditingIndex(null);
-                            } else if (e.key === 'Escape') {
+                            } else if (e.key === "Escape") {
                               setEditingIndex(null);
                             }
                           }}
@@ -577,7 +652,9 @@ export default function Home() {
                           </button>
                           <button
                             onClick={() => {
-                              const newOutline = outline.filter((_, i) => i !== index);
+                              const newOutline = outline.filter(
+                                (_, i) => i !== index
+                              );
                               setOutline(newOutline);
                             }}
                             className="text-[var(--secondary)] hover:text-red-500"
@@ -594,15 +671,15 @@ export default function Home() {
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    setOutline([...outline, 'New section']);
+                    setOutline([...outline, "New section"]);
                     setEditingIndex(outline.length);
                   }}
                   className="btn-secondary"
                 >
                   Add Section
                 </button>
-                <button 
-                  onClick={handleContentGeneration} 
+                <button
+                  onClick={handleContentGeneration}
                   className="btn-primary flex-1"
                 >
                   Generate Content
@@ -635,15 +712,35 @@ export default function Home() {
                   >
                     {showCopied ? (
                       <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M5 13l4 4L19 7"
+                          />
                         </svg>
                         Copied!
                       </>
                     ) : (
                       <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
+                          />
                         </svg>
                         Copy
                       </>
@@ -654,8 +751,18 @@ export default function Home() {
                     className="btn-secondary text-sm flex items-center gap-1"
                     title="Export as HTML"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                      />
                     </svg>
                     Export
                   </button>
@@ -663,14 +770,16 @@ export default function Home() {
               )}
             </div>
           </div>
-          
+
           <div className="card p-6 md:p-8">
             {isLoading ? (
               <div className="space-y-4">
                 <div className="text-center py-4">
                   <div className="w-8 h-8 border-4 border-[var(--primary)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
                   <p className="text-[var(--secondary)] mb-2">
-                    {currentSection ? `Generating ${currentSection}...` : 'Preparing content...'}
+                    {currentSection
+                      ? `Generating ${currentSection}...`
+                      : "Preparing content..."}
                   </p>
                   {wordCount > 0 && (
                     <p className="text-sm text-[var(--secondary)]">
@@ -680,7 +789,9 @@ export default function Home() {
                 </div>
                 {streamedContent && (
                   <div className="prose prose-lg dark:prose-invert max-w-none">
-                    <div dangerouslySetInnerHTML={{ __html: streamedContent }} />
+                    <div
+                      dangerouslySetInnerHTML={{ __html: streamedContent }}
+                    />
                   </div>
                 )}
               </div>
@@ -718,15 +829,35 @@ export default function Home() {
                   >
                     {showCopied ? (
                       <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M5 13l4 4L19 7"
+                          />
                         </svg>
                         Copied!
                       </>
                     ) : (
                       <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
+                          />
                         </svg>
                         Copy
                       </>
@@ -737,28 +868,40 @@ export default function Home() {
                     className="btn-secondary text-sm flex items-center gap-1"
                     title="Export as HTML"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                      />
                     </svg>
                     Export
                   </button>
                 </div>
               )}
-              <button 
-                onClick={() => setStep(3)} 
+              <button
+                onClick={() => setStep(3)}
                 className="btn-secondary text-sm"
               >
                 ← Back
               </button>
             </div>
           </div>
-          
+
           {isLoading ? (
             <div className="space-y-4">
               <div className="text-center py-4">
                 <div className="w-8 h-8 border-4 border-[var(--primary)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-[var(--secondary)] mb-2">
-                  {currentSection ? `Generating ${currentSection}...` : 'Preparing content...'}
+                  {currentSection
+                    ? `Generating ${currentSection}...`
+                    : "Preparing content..."}
                 </p>
                 {wordCount > 0 && (
                   <p className="text-sm text-[var(--secondary)]">
