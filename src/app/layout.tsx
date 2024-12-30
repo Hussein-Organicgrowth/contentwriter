@@ -7,8 +7,8 @@ import {
 	SignedIn,
 	SignedOut,
 	SignInButton,
-	UserButton,
 } from "@clerk/nextjs";
+import { Sidebar } from "@/components/Sidebar";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -27,13 +27,17 @@ export default function RootLayout({
 			<html lang="en">
 				<body className={inter.className}>
 					<SignedOut>
-						<SignInButton />
+						<div className="flex min-h-screen items-center justify-center">
+							<SignInButton />
+						</div>
 					</SignedOut>
 					<SignedIn>
-						<UserButton />
+						<div className="flex h-screen">
+							<Sidebar />
+							<main className="flex-1 overflow-y-auto">{children}</main>
+						</div>
 					</SignedIn>
 					<Toaster position="top-center" />
-					{children}
 				</body>
 			</html>
 		</ClerkProvider>
