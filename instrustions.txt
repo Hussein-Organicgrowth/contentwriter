@@ -1,0 +1,22 @@
+I need for you create a libary like this:
+
+
+AIControl("System prompt here ")
+.addInstruction("Instruction 1")
+.addInstruction("Instruction 2")
+.addInstruction("Instruction 3")
+.addInstruction("Instruction 4")
+.addInstruction("Instruction 5")
+.addInstruction("Instruction 6")
+.addInstruction("Instruction 7")
+.addInstruction("Instruction 8")
+.addInstruction("Instruction 9")
+.addInstruction("Instruction 10")
+.addUserPrompt("User prompt here")
+.execute()
+
+
+This will be used to generate a response from the AI. First the user will have to input their system prompt, then they will have to add their instructions, then they will have to add their user prompt, and then they will have to execute the code.
+
+The user will also have to input their openai api key and this does use the openai api.
+
