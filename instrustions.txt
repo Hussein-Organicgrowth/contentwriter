@@ -1,22 +1,16 @@
-I need for you create a libary like this:
+Add mongodb as the database for the project. 
+
+Create the following models
+- website (The user goes through the compony form and then this is created) 
+Under the website model create a field called "content" which is an array of objects. Each object should have the following fields:
+- title
+- html 
+Under the website model create a field called toneofvoice which is a big string. 
+
+The user should be able to go through the company form and then the website should be created and the user should be able to go to the dashboard. 
+
+The user will be able to go to the dashboard and see the website and the content and the tone of voice. 
 
 
-AIControl("System prompt here ")
-.addInstruction("Instruction 1")
-.addInstruction("Instruction 2")
-.addInstruction("Instruction 3")
-.addInstruction("Instruction 4")
-.addInstruction("Instruction 5")
-.addInstruction("Instruction 6")
-.addInstruction("Instruction 7")
-.addInstruction("Instruction 8")
-.addInstruction("Instruction 9")
-.addInstruction("Instruction 10")
-.addUserPrompt("User prompt here")
-.execute()
 
-
-This will be used to generate a response from the AI. First the user will have to input their system prompt, then they will have to add their instructions, then they will have to add their user prompt, and then they will have to execute the code.
-
-The user will also have to input their openai api key and this does use the openai api.
 

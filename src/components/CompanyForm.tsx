@@ -50,12 +50,35 @@ export default function CompanyForm({ onComplete }: CompanyFormProps) {
 		setIsAnalyzingWebsite(false);
 	};
 
-	const handleSubmit = () => {
+	const handleSubmit = async () => {
 		if (!companyInfo.name) {
 			toast.error("Please enter your company name");
 			return;
 		}
-		onComplete(companyInfo);
+
+		try {
+			const response = await fetch("/api/website", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					name: companyInfo.name,
+					website: companyInfo.website,
+					description: companyInfo.description,
+					summary: companyInfo.summary,
+				}),
+			});
+
+			if (!response.ok) {
+				throw new Error("Failed to create website");
+			}
+
+			const data = await response.json();
+			onComplete(companyInfo);
+			toast.success("Website information saved successfully!");
+		} catch (error) {
+			console.error("Error:", error);
+			toast.error("Failed to save website information");
+		}
 	};
 
 	return (
