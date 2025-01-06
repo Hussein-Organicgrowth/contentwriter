@@ -206,70 +206,95 @@ export async function POST(req: Request) {
 		console.log("ANALYSIS:", competitorAnalysis);
 
 		const completion = await openai.chat.completions.create({
-			model: "gpt-4o-mini",
+			model: "chatgpt-4o-latest",
 			messages: [
 				{
 					role: "system",
-					content: `You are a professional content strategist who creates detailed, well-structured outlines.
-            ${languageInstructions[language] || languageInstructions["en-US"]}
-            ${countryContext[targetCountry]}
+					content: `You are an expert SEO content strategist who creates highly optimized, user-focused content outlines.
+					${languageInstructions[language] || languageInstructions["en-US"]}
+					${countryContext[targetCountry]}
 
-            I will provide you with:
+					I will provide you with:
+					- A primary keyword
+					- A title
+					- Competitor analysis from top-ranking content
 
-            A keyword
-            A title
-            Detailed analysis of the top 4 competing articles, including their outline structures
-            Your task is to create a comprehensive outline that:
+					Your task is to create an SEO-optimized outline that:
+					- Follows the skyscraper technique to outperform competitor content
+					- Implements strategic keyword placement in headers
+					- Addresses user search intent comprehensively
+					- Creates a content hierarchy that search engines can easily understand
+					- Includes semantic SEO elements and related topics
+					- Maintains optimal content depth for the target keyword
+					- Ensures proper keyword distribution across sections
 
-            Aligns with the structure appropriate for the target language and country.
-            Incorporates the best structural elements observed in competitor outlines.
-            Introduces topics or angles competitors might have missed.
-            Follows a logical, reader-friendly flow.
-            Balances SEO optimization with readability.
-            Adheres strictly to the target language.
-            Remains concise and to the point.
-            Formatting Guidelines:
+					SEO Optimization Guidelines:
+					- H2 headers should include primary or secondary keywords when natural
+					- H3 headers should target long-tail variations and related questions
+					- Include sections for featured snippet opportunities
+					- Structure content to target "People Also Ask" opportunities
+					- Add sections for key statistics and data points
+					- Include comparison sections when relevant
+					- Plan for rich media placement (images, videos, tables)
 
-            Use numbered sections (1., 2., etc.) for main headings.
-            Use lettered subsections (a., b., etc.) for subtopics.
-            Follow this format:
-            Section 1
-            a. Subsection 1
-            b. Subsection 2
-            c. Subsection 3
-            Section 2
-            a. Subsection 1
-            b. Subsection 2
-            c. Subsection 3
-            Rules:
+					Formatting Requirements:
+					- Use H2 for main sections (primary keyword focus)
+					- Use H3 for subsections (secondary keyword focus)
+					- Follow this format exactly:
+					  H2: Main Section (with keyword)
+					  H3: Subsection (with related term)
+					  H4: Detailed Point (with specific focus)
 
-            DO NOT add any empty lines (/n) or tabs (/t).
-            Follow the content type specified in ${contentType}.
-            Use the content type to determine the number of sections and subsections.
-            Keep the outline limited to 5-6 sections with subsections.
-            Output Example (Strictly Follow This Style):
+					Content Structure Rules:
+					- Each line must start with the header level (H2:, H3:)
+					- H3 sections must follow an H2 section
+					- Include an FAQ section for featured snippet targeting
+					- Add comparison sections when relevant
+					- Include data/statistics sections for backlink potential
+					- Maintain proper keyword density in headers
+					- Follow E-E-A-T principles in structure
 
-            Introduction
-            a. Overview of the Topic
-            b. Importance of the Topic
-            Key Concepts
-            a. Concept 1
-            b. Concept 2
-            Focus on clarity, structure, and alignment with the specified content type.`,
+					Required Sections:
+					- Introduction (with featured snippet target)
+					- Main topic sections (with keyword variations)
+					- Practical examples or case studies
+					- Expert insights or analysis
+					- FAQ section (targeting "People Also Ask")
+					- Conclusion with key takeaways
+
+					Output Example (Strictly Follow This Format):
+					H2: [Primary Keyword]: Complete Guide for [Current Year]
+					H3: Understanding [Primary Keyword]: Key Concepts
+					H3: Why [Primary Keyword] Matters in [Industry/Context]
+					H2: [Secondary Keyword]: Essential Components
+					H3: Top [Number] [Related Keyword] Strategies
+					H3: Common [Primary Keyword] Challenges and Solutions
+					H2: Expert Tips for [Primary Keyword] Optimization
+					H3: Best Practices from Industry Leaders
+					H2: Frequently Asked Questions About [Primary Keyword]
+					H3: [Common Question 1]
+					H3: [Common Question 2]
+					H2: [Primary Keyword] Success Stories and Examples`,
 				},
 				{
 					role: "user",
-					content: `Keyword: ${keyword}
-          Title: ${title}
-          
-          Competitor Analysis:
-          ${competitorAnalysis}
-          
-          Please create a comprehensive outline based on this information, improving upon the competitor structures while maintaining what works well.
-          KEEP THE OUTLINE TO MAX 5-6 SECTIONS AND SUBSECTIONS.`,
+					content: `Primary Keyword: ${keyword}
+					Title: ${title}
+					is very important to use the content type to determine the appropriate header structure
+					Content Type: ${contentType}
+					
+					Competitor Analysis:
+					${competitorAnalysis}
+					
+					Create a comprehensive, SEO-optimized outline that outperforms competitor content while maintaining readability and user value.
+					Focus on featured snippet opportunities and "People Also Ask" potential.
+					KEEP THE OUTLINE TO MAX 5-6 MAIN SECTIONS (H2) WITH RELEVANT SUBSECTIONS.
+					ONLY OUTPUT THE OUTLINE, NO OTHER TEXT
+					DO NOT INCLUDE FAQ AND A CONCLUSION.
+					`,
 				},
 			],
-			temperature: 0.5,
+			temperature: 0.4,
 		});
 
 		const outline =

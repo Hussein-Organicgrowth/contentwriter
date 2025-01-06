@@ -12,7 +12,8 @@ export async function POST(request: Request) {
 		}
 
 		await connectToDatabase();
-		const { name, website, description, summary } = await request.json();
+		const { name, website, description, summary, toneofvoice, targetAudience } =
+			await request.json();
 
 		const websiteDoc = await Website.create({
 			name,
@@ -20,7 +21,8 @@ export async function POST(request: Request) {
 			description,
 			summary,
 			content: [], // Initialize with empty content
-			toneofvoice: "", // Initialize with empty tone of voice
+			toneofvoice, // Add tone of voice
+			targetAudience, // Add target audience
 			userId: user.id, // Add the authenticated user's ID
 		});
 
@@ -54,6 +56,45 @@ export async function GET(request: Request) {
 		console.error("Error fetching websites:", error);
 		return NextResponse.json(
 			{ error: "Failed to fetch websites" },
+			{ status: 500 }
+		);
+	}
+}
+
+export async function DELETE(request: Request) {
+	try {
+		const user = await currentUser();
+
+		if (!user) {
+			return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+		}
+
+		await connectToDatabase();
+		const { searchParams } = new URL(request.url);
+		const websiteId = searchParams.get("id");
+
+		if (!websiteId) {
+			return NextResponse.json(
+				{ error: "Website ID is required" },
+				{ status: 400 }
+			);
+		}
+
+		// Find and delete the website, ensuring it belongs to the current user
+		const deletedWebsite = await Website.findOneAndDelete({
+			_id: websiteId,
+			userId: user.id,
+		});
+
+		if (!deletedWebsite) {
+			return NextResponse.json({ error: "Website not found" }, { status: 404 });
+		}
+
+		return NextResponse.json({ success: true }, { status: 200 });
+	} catch (error) {
+		console.error("Error deleting website:", error);
+		return NextResponse.json(
+			{ error: "Failed to delete website" },
 			{ status: 500 }
 		);
 	}

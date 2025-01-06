@@ -14,7 +14,6 @@ async function generateSection(
 	relatedKeywords: string[],
 	previousContent: string = "",
 	isIntroduction: boolean = false,
-
 	tone: {
 		tone: string;
 		style: string;
@@ -35,65 +34,74 @@ async function generateSection(
 		website: string;
 		description: string;
 		summary: string;
-	} = {
-		name: "",
-		website: "",
-		description: "",
-		summary: "",
+		toneofvoice: string;
+		targetAudience: string;
 	}
 ) {
 	const contextPrompt = previousContent
-		? `Previous content for context (do not repeat this):\n${previousContent}\n\n`
+		? `Here's what we've written so far (don't repeat this):\n${previousContent}\n\n`
 		: "";
 
-	const sectionPrompt = isIntroduction
-		? `Write an engaging introduction section (without title or heading) for an article about "${keyword}".`
-		: `Write the content for the section "${section}" (without repeating the section title) for the article about "${keyword}".`;
+	const sectionPrompt = `Write a concise, focused section about "${section}" for the topic "${keyword}". 
+Keep it brief but informative - aim for 2-5 short paragraphs maximum.
+DO NOT include any headings or titles in your response - these will be handled separately.`;
 
-	const toneInstruction = tone.tone
-		? `\nMatch this writing style:
-      - Overall Tone: ${tone.tone}
-      - Writing Style: ${tone.style}
-      - Voice: ${tone.voice}
-      - Language Patterns: ${tone.language}
-      - Engagement Approach: ${tone.engagement}`
-		: "";
+	const companyContext = `
+Quick brief about ${companyInfo.name}:
+- They help: ${companyInfo.targetAudience}
+- Their style: ${companyInfo.toneofvoice}
+- Their story: ${companyInfo.summary}`;
 
 	const languageInstruction = getLanguageInstruction(language);
 	const countryContext = getCountryContext(targetCountry);
 
 	const prompt = `${contextPrompt}${sectionPrompt}
 
-Include these related keywords naturally where relevant: ${relatedKeywords.join(
+${companyContext}
+
+Key guidelines:
+1. Be concise - each paragraph should be 2-3 sentences maximum
+2. Total length should be around 150-200 words
+3. Focus on the most important points only
+4. Use simple, clear language
+5. Include only essential information
+6. Avoid repetition and fluff
+7. Make every word count
+8. DO NOT include any headings or titles - they will be added separately
+
+Writing style:
+- Write in ${companyInfo.toneofvoice}
+- Address ${companyInfo.targetAudience} directly
+- Keep it authentic to their brand
+- Be clear and direct
+
+Format:
+- <p> for short, focused paragraphs
+- <strong> for key points
+- <ul> for brief lists (if needed)
+- Keep lists to 3-4 items maximum
+- DO NOT include any <h1>, <h2>, <h3>, etc. tags
+
+Naturally incorporate these related topics (only if relevant): ${relatedKeywords.join(
 		", "
-	)}${toneInstruction}
+	)}`;
 
-Format the content with HTML tags:
-- Use <p> tags for paragraphs
-- Use <ul> and <li> tags for lists
-- Use <strong> tags for emphasis
-
-Guidelines:
-1. Write in the specified tone and style
-2. Include specific examples and explanations
-3. Make the content informative and valuable
-4. Maintain a natural flow with the previous content
-5. Keep SEO in mind while ensuring readability
-6. Write approximately 200-300 words for this section
-7. DO NOT include the title or section heading - these will be added automatically`;
-	const stringCompany = JSON.stringify(companyInfo);
-	console.log(stringCompany);
 	const completion = await openai.chat.completions.create({
 		model: "chatgpt-4o-latest",
 		messages: [
 			{
 				role: "system",
-				content: `You are a professional content writer who creates high-quality, SEO-optimized articles with proper HTML formatting. 
-        ${languageInstruction}
-        ${countryContext}
-        You are writing the text for a company website. You have the following information:
-        ${stringCompany}
-        Write one section at a time, maintaining context with previous content. Do not include titles or headings - these will be added separately.`,
+				content: `You are a precise, concise content writer who creates clear, focused content.
+				${languageInstruction}
+				${countryContext}
+				
+				Your main goals:
+				1. Be brief but informative
+				2. Focus on quality over quantity
+				3. Write for ${companyInfo.targetAudience}
+				4. Match ${companyInfo.name}'s tone: ${companyInfo.toneofvoice}
+				
+				Remember: Less is more. Every word must serve a purpose.`,
 			},
 			{
 				role: "user",
@@ -120,84 +128,63 @@ export async function POST(req: Request) {
 			companyInfo,
 		} = await req.json();
 
+		console.log("Received outline:", JSON.stringify(outline, null, 2));
+
 		const encoder = new TextEncoder();
 		const stream = new ReadableStream({
 			async start(controller) {
 				try {
 					let fullContent = "";
+					const processedSections = new Set(); // Track normalized section titles
 
-					// Title
+					// Helper function to normalize section titles for comparison
+					const normalizeTitle = (title: string) => title.toLowerCase().trim();
+
+					// Send the main title
 					const titleContent = `<h1>${title}</h1>\n\n`;
 					controller.enqueue(
 						encoder.encode(
 							`data: ${JSON.stringify({
 								content: titleContent,
-								section: "Title",
 							})}\n\n`
 						)
 					);
 					fullContent += titleContent;
 
-					// Introduction
-					const introHeader = "<h2>Introduction</h2>\n";
-					controller.enqueue(
-						encoder.encode(
-							`data: ${JSON.stringify({
-								content: introHeader,
-								section: "Introduction",
-							})}\n\n`
-						)
-					);
-					fullContent += introHeader;
-
-					const introCompletion = await generateSection(
-						openai,
-						keyword,
-						title,
-						"Introduction",
-						relatedKeywords,
-						"",
-						true,
-						tone,
-						language,
-						targetCountry,
-						companyInfo
-					);
-
-					for await (const chunk of introCompletion) {
-						const content = chunk.choices[0]?.delta?.content || "";
-						if (content) {
-							controller.enqueue(
-								encoder.encode(
-									`data: ${JSON.stringify({
-										content,
-										section: "Introduction",
-									})}\n\n`
-								)
-							);
-							fullContent += content;
-						}
-					}
-
-					// Main sections
-					for (let i = 1; i < outline.length - 1; i++) {
+					// Process all sections from the outline
+					for (let i = 0; i < outline.length; i++) {
 						const section = outline[i];
-						const sectionHeader = `\n<h2>${section}</h2>\n`;
+						const normalizedTitle = normalizeTitle(section.content);
+
+						console.log(`Processing section ${i + 1}:`, {
+							content: section.content,
+							normalizedTitle,
+							isProcessed: processedSections.has(normalizedTitle),
+							headingLevel: section.level,
+						});
+
+						// Skip if we've already processed this section
+						if (processedSections.has(normalizedTitle)) {
+							console.log(`Skipping duplicate section: ${section.content}`);
+							continue;
+						}
+
+						// Send progress update
 						controller.enqueue(
 							encoder.encode(
 								`data: ${JSON.stringify({
-									content: sectionHeader,
-									section,
+									section: section.content,
+									isProgress: true,
 								})}\n\n`
 							)
 						);
-						fullContent += sectionHeader;
 
+						// Generate content
 						const completion = await generateSection(
 							openai,
 							keyword,
 							title,
-							section,
+							section.content,
 							relatedKeywords,
 							fullContent,
 							false,
@@ -207,62 +194,73 @@ export async function POST(req: Request) {
 							companyInfo
 						);
 
+						// Create section header using the level from the outline
+						const headingLevel = section.level;
+						const sectionHeader = `\n<${headingLevel}>${section.content}</${headingLevel}>\n`;
+
+						// Send the header first
+						controller.enqueue(
+							encoder.encode(
+								`data: ${JSON.stringify({
+									content: sectionHeader,
+								})}\n\n`
+							)
+						);
+						fullContent += sectionHeader;
+
+						// Stream the content chunks as they come
+						let isFirstChunk = true;
 						for await (const chunk of completion) {
 							const content = chunk.choices[0]?.delta?.content || "";
 							if (content) {
-								controller.enqueue(
-									encoder.encode(
-										`data: ${JSON.stringify({ content, section })}\n\n`
-									)
-								);
-								fullContent += content;
+								// For the first chunk, we'll check and remove any heading that might be at the start
+								if (isFirstChunk) {
+									const headingPattern = new RegExp(
+										`<h[1-6]>${section.content}</h[1-6]>`,
+										"gi"
+									);
+									const cleanedContent = content.replace(headingPattern, "");
+									if (cleanedContent) {
+										controller.enqueue(
+											encoder.encode(
+												`data: ${JSON.stringify({
+													content: cleanedContent,
+												})}\n\n`
+											)
+										);
+										fullContent += cleanedContent;
+									}
+									isFirstChunk = false;
+								} else {
+									// Stream subsequent chunks directly
+									controller.enqueue(
+										encoder.encode(
+											`data: ${JSON.stringify({
+												content: content,
+											})}\n\n`
+										)
+									);
+									fullContent += content;
+								}
 							}
 						}
+
+						// Mark this section as processed
+						processedSections.add(normalizedTitle);
+						console.log(
+							"Updated processed sections:",
+							Array.from(processedSections)
+						);
 					}
 
-					// Conclusion
-					const conclusion = outline[outline.length - 1];
-					const conclusionHeader = `\n<h2>${conclusion}</h2>\n`;
+					// Send the done message in proper JSON format
 					controller.enqueue(
 						encoder.encode(
 							`data: ${JSON.stringify({
-								content: conclusionHeader,
-								section: conclusion,
+								done: true,
 							})}\n\n`
 						)
 					);
-					fullContent += conclusionHeader;
-
-					const conclusionCompletion = await generateSection(
-						openai,
-						keyword,
-						title,
-						conclusion,
-						relatedKeywords,
-						fullContent,
-						false,
-						tone,
-						language,
-						targetCountry,
-						companyInfo
-					);
-
-					for await (const chunk of conclusionCompletion) {
-						const content = chunk.choices[0]?.delta?.content || "";
-						if (content) {
-							controller.enqueue(
-								encoder.encode(
-									`data: ${JSON.stringify({
-										content,
-										section: conclusion,
-									})}\n\n`
-								)
-							);
-							fullContent += content;
-						}
-					}
-
-					controller.enqueue(encoder.encode("data: [DONE]\n\n"));
 				} catch (error) {
 					console.error("Error in stream:", error);
 					controller.error(error);

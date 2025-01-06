@@ -44,6 +44,7 @@ export async function POST(req: Request) {
 			language = "en-US",
 			targetCountry = "US",
 			contentType,
+			businessName,
 		} = await req.json();
 		console.log(keyword, language, targetCountry);
 		const languageInstructions: { [key in LanguageKeys]: string } = {
@@ -83,6 +84,9 @@ export async function POST(req: Request) {
 
 		const languageKey: LanguageKeys = language;
 		const targetCountryKey: CountryKeys = targetCountry;
+
+		const businessNameValue = businessName || "";
+		console.log(businessNameValue);
 		console.log(languageKey, targetCountryKey);
 
 		const languageInstructionsValue =
@@ -124,11 +128,13 @@ export async function POST(req: Request) {
           - Utilize power words that evoke emotion or curiosity.
           - Maintain proper capitalization rules specific to the target language and country.
           - Ensure the title is unique and stands out among similar content.
+		  - Make sure to format the title in a normal way and human way. DONT INCLUDE : or - or any other symbols.
           `,
 				},
 				{
 					role: "user",
-					content: `Create a compelling title for an article about "${keyword}". Return only the title, no other text.`,
+					content: `Create a compelling title for an article about "${keyword}". Return only the title, no other text. - If the business name is provided, make sure to include it in the title.
+		  ${businessNameValue ? `- Business name: ${businessNameValue}` : ""}`,
 				},
 			],
 			temperature: 0.7,
