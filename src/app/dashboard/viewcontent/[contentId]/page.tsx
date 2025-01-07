@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { TextEditor } from "../../texteditor/page";
+import TextEditor from "@/app/dashboard/texteditor/page";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { toast } from "react-hot-toast";

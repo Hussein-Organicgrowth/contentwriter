@@ -393,7 +393,10 @@ const MenuBar = ({
 	);
 };
 
-const TextEditor = ({ initialContent, contentId }: TextEditorProps) => {
+export default function TextEditor({
+	initialContent,
+	contentId,
+}: TextEditorProps) {
 	const [html, setHtml] = useState(initialContent);
 	const [lastSavedHtml, setLastSavedHtml] = useState(initialContent);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -757,15 +760,4 @@ const TextEditor = ({ initialContent, contentId }: TextEditorProps) => {
 			</Dialog>
 		</div>
 	);
-};
-
-interface PageProps {
-	params: { contentId?: string };
-	searchParams: { [key: string]: string | string[] | undefined };
 }
-
-export default function TextEditorPage(props: PageProps) {
-	return null; // This page should not be rendered directly
-}
-
-export { TextEditor };

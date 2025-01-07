@@ -43,6 +43,15 @@ import {
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "react-hot-toast";
+import {
+	Dialog,
+	DialogContent,
+	DialogTrigger,
+	DialogHeader,
+	DialogTitle,
+	DialogDescription,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface Content {
 	_id: string;
@@ -63,6 +72,8 @@ export default function ViewContent() {
 	const [loading, setLoading] = useState(true);
 	const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 	const [selectedContent, setSelectedContent] = useState<Content | null>(null);
+	const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+	const [isBulkUploading, setIsBulkUploading] = useState(false);
 
 	useEffect(() => {
 		fetchContent();
@@ -185,6 +196,81 @@ export default function ViewContent() {
 		return words.filter((word) => word.length > 0).length;
 	};
 
+	const handleBulkWebhookUpload = async () => {
+		const selectedContent = items.filter((item) => selectedItems.has(item._id));
+		if (selectedContent.length === 0) {
+			toast.error("Please select content to upload");
+			return;
+		}
+
+		const webhookUrl = localStorage.getItem("webhookUrl");
+		if (!webhookUrl) {
+			toast.error("Please configure webhook URL in settings");
+			return;
+		}
+
+		setIsBulkUploading(true);
+		let successCount = 0;
+		let failureCount = 0;
+
+		for (const content of selectedContent) {
+			try {
+				const response = await fetch("/api/content/webhook", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						webhookUrl,
+						content: {
+							title: content.title,
+							content: content.html,
+							status: content.status.toLowerCase(),
+							keywords: {
+								main: content.mainKeyword,
+								related: content.relatedKeywords,
+							},
+						},
+					}),
+				});
+
+				if (!response.ok) {
+					throw new Error(`Failed to send ${content.title} to webhook`);
+				}
+				successCount++;
+				toast.success(`Sent "${content.title}" to webhook`);
+			} catch (error) {
+				console.error(`Error sending ${content.title} to webhook:`, error);
+				failureCount++;
+				toast.error(`Failed to send "${content.title}" to webhook`);
+			}
+		}
+
+		setIsBulkUploading(false);
+		setSelectedItems(new Set());
+		toast.success(
+			`Completed: ${successCount} succeeded, ${failureCount} failed`
+		);
+	};
+
+	const toggleItemSelection = (id: string) => {
+		const newSelected = new Set(selectedItems);
+		if (newSelected.has(id)) {
+			newSelected.delete(id);
+		} else {
+			newSelected.add(id);
+		}
+		setSelectedItems(newSelected);
+	};
+
+	const toggleSelectAll = () => {
+		if (selectedItems.size === sortedContent.length) {
+			setSelectedItems(new Set());
+		} else {
+			setSelectedItems(new Set(sortedContent.map((item) => item._id)));
+		}
+	};
+
 	return (
 		<div className="container mx-auto p-6">
 			<div className="flex flex-col space-y-6">
@@ -197,9 +283,29 @@ export default function ViewContent() {
 							Browse and manage your generated content
 						</p>
 					</div>
-					<Button className="gap-2" onClick={handleGenerateNew}>
-						<Plus className="h-4 w-4" /> Generate New Content
-					</Button>
+					<div className="flex gap-2">
+						{selectedItems.size > 0 && (
+							<Button
+								variant="outline"
+								onClick={handleBulkWebhookUpload}
+								disabled={isBulkUploading}>
+								{isBulkUploading ? (
+									<>
+										<div className="mr-2 h-4 w-4 animate-spin rounded-full border-b-2 border-current"></div>
+										Uploading...
+									</>
+								) : (
+									<>Send Selected to Webhook ({selectedItems.size})</>
+								)}
+							</Button>
+						)}
+						<Button
+							className="gap-2"
+							onClick={handleGenerateNew}
+							variant="secondary">
+							<Plus className="h-4 w-4" /> Generate New Content
+						</Button>
+					</div>
 				</div>
 
 				<Card>
@@ -230,6 +336,16 @@ export default function ViewContent() {
 								<Table>
 									<TableHeader>
 										<TableRow>
+											<TableHead className="w-12">
+												<Checkbox
+													checked={
+														selectedItems.size === sortedContent.length &&
+														sortedContent.length > 0
+													}
+													onCheckedChange={toggleSelectAll}
+													aria-label="Select all"
+												/>
+											</TableHead>
 											<TableHead>Title</TableHead>
 											<TableHead>Type</TableHead>
 											<TableHead>Words</TableHead>
@@ -248,6 +364,15 @@ export default function ViewContent() {
 									<TableBody>
 										{sortedContent.map((item) => (
 											<TableRow key={item._id}>
+												<TableCell>
+													<Checkbox
+														checked={selectedItems.has(item._id)}
+														onCheckedChange={() =>
+															toggleItemSelection(item._id)
+														}
+														aria-label={`Select ${item.title}`}
+													/>
+												</TableCell>
 												<TableCell className="font-medium">
 													{item.title}
 												</TableCell>
@@ -306,6 +431,40 @@ export default function ViewContent() {
 														onClick={() => handleViewContent(item._id)}>
 														View
 													</Button>
+
+													<Dialog>
+														<DialogTrigger asChild>
+															<Button variant="outline" size="sm">
+																Upload
+															</Button>
+														</DialogTrigger>
+														<DialogContent className="sm:max-w-[425px]">
+															<DialogHeader>
+																<DialogTitle>Upload Content</DialogTitle>
+																<DialogDescription>
+																	Send your content to the configured webhook
+																</DialogDescription>
+															</DialogHeader>
+															<div className="grid gap-4 py-4">
+																<Button
+																	variant="outline"
+																	onClick={() => {
+																		const newSet = new Set([item._id]);
+																		setSelectedItems(newSet);
+																		handleBulkWebhookUpload();
+																	}}
+																	className="w-full justify-start">
+																	<img
+																		src="https://images.seeklogo.com/logo-png/42/1/webhook-logo-png_seeklogo-428961.png"
+																		alt="Webhook"
+																		className="mr-2 h-4 w-4"
+																	/>
+																	Send to Webhook
+																</Button>
+															</div>
+														</DialogContent>
+													</Dialog>
+
 													<Button
 														variant="destructive"
 														size="sm"

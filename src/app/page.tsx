@@ -1,971 +1,449 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { LANGUAGES, COUNTRIES } from "@/lib/localization";
-import { toast } from "react-hot-toast";
-import CompanyForm from "@/components/CompanyForm";
+import { Button } from "@/components/ui/button";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
+import Link from "next/link";
+import {
+	ArrowRight,
+	Sparkles,
+	PenTool,
+	RefreshCcw,
+	LayoutGrid,
+	Target,
+	Wand2,
+	Edit3,
+	CheckCircle2,
+	MessageSquare,
+	Settings2,
+	Globe2,
+	Lightbulb,
+} from "lucide-react";
 
 export default function Home() {
-	const [keyword, setKeyword] = useState("");
-	const [title, setTitle] = useState("");
-	const [relatedKeywords, setRelatedKeywords] = useState<string[]>([]);
-	const [newKeyword, setNewKeyword] = useState("");
-	const [outline, setOutline] = useState<string[]>([]);
-	const [editingIndex, setEditingIndex] = useState<number | null>(null);
-	const [streamedContent, setStreamedContent] = useState("");
-	const [currentSection, setCurrentSection] = useState("");
-	const [wordCount, setWordCount] = useState(0);
-	const [step, setStep] = useState(0);
-	const [isLoading, setIsLoading] = useState(false);
-	const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
-	const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
-	const [sampleText, setSampleText] = useState("");
-	const [tone, setTone] = useState({
-		detailedAnalysis: "",
-		tone: "",
-		style: "",
-		voice: "",
-		language: "",
-		engagement: "",
-	});
-	const [isAnalyzingTone, setIsAnalyzingTone] = useState(false);
-	const [language, setLanguage] = useState("en-US");
-	const [targetCountry, setTargetCountry] = useState("US");
-	const [showCopied, setShowCopied] = useState(false);
-	const [companyInfo, setCompanyInfo] = useState({
-		name: "",
-		website: "",
-		description: "",
-		summary: "",
-	});
-	const [contentType, setContentType] = useState("article");
-
-	const CONTENT_TYPES = [
-		{
-			value: "article",
-			label: "Article",
-			description: "In-depth, informative content with multiple sections",
-		},
-		{
-			value: "blog",
-			label: "Blog Post",
-			description: "Engaging, conversational content with personal insights",
-		},
-		{
-			value: "landing_page",
-			label: "Landing Page",
-			description: "Persuasive content focused on conversion",
-		},
-		{
-			value: "service_page",
-			label: "Service Page",
-			description: "Detailed information about a specific service",
-		},
-		{
-			value: "category_page",
-			label: "Category Page",
-			description: "Overview content for product/service categories",
-		},
-	];
-
-	useEffect(() => {
-		const words = streamedContent.trim().split(/\s+/).length;
-		setWordCount(words);
-	}, [streamedContent]);
-
-	const handleGenerateKeywords = async () => {
-		if (!keyword) return;
-		setIsGeneratingKeywords(true);
-		try {
-			const response = await fetch("/api/keywords", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ keyword, title }),
-			});
-			const data = await response.json();
-			if (data.keywords) {
-				setRelatedKeywords(data.keywords);
-			}
-		} catch (error) {
-			console.error("Error:", error);
-		}
-		setIsGeneratingKeywords(false);
-	};
-
-	const handleAddKeyword = (e: React.FormEvent) => {
-		e.preventDefault();
-		if (newKeyword.trim()) {
-			setRelatedKeywords((prev) => [...prev, newKeyword.trim()]);
-			setNewKeyword("");
-		}
-	};
-
-	const removeKeyword = (indexToRemove: number) => {
-		setRelatedKeywords((prev) =>
-			prev.filter((_, index) => index !== indexToRemove)
-		);
-	};
-
-	const handleKeywordSubmit = async (e: React.FormEvent) => {
-		e.preventDefault();
-		setStep(2);
-		handleOutlineGeneration();
-	};
-
-	const handleOutlineGeneration = async () => {
-		setIsLoading(true);
-		try {
-			const response = await fetch("/api/outline", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					keyword,
-					title,
-					language,
-					targetCountry,
-					contentType,
-				}),
-			});
-			const data = await response.json();
-			if (data.outline) {
-				console.log("Received outline:", data.outline);
-				setOutline(data.outline);
-			}
-		} catch (error) {
-			console.error("Error:", error);
-		}
-		setIsLoading(false);
-	};
-
-	const handleGenerateTitle = async () => {
-		if (!keyword) return;
-		setIsGeneratingTitle(true);
-		try {
-			const response = await fetch("/api/title", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ keyword, language, targetCountry, contentType }),
-			});
-			const data = await response.json();
-			if (data.title) {
-				setTitle(data.title);
-			}
-		} catch (error) {
-			console.error("Error:", error);
-		}
-		setIsGeneratingTitle(false);
-	};
-
-	const handleContentGeneration = async () => {
-		setStep(3);
-		setIsLoading(true);
-		setStreamedContent("");
-		setWordCount(0);
-		setCurrentSection("");
-
-		try {
-			const response = await fetch("/api/content", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					keyword,
-					title,
-					outline,
-					relatedKeywords,
-					tone,
-					language,
-					targetCountry,
-					companyInfo,
-					contentType,
-				}),
-			});
-
-			if (!response.ok) throw new Error("Network response was not ok");
-			const reader = response.body?.getReader();
-			if (!reader) throw new Error("No reader available");
-
-			setStep(4);
-
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				const text = new TextDecoder().decode(value);
-				const lines = text.split("\n");
-
-				for (const line of lines) {
-					if (line.startsWith("data: ")) {
-						const data = line.slice(5);
-						if (data === "[DONE]") break;
-
-						try {
-							const parsed = JSON.parse(data);
-							if (parsed.content) {
-								setStreamedContent((prev) => {
-									const newContent = prev + parsed.content;
-									// Count words in the new content
-									const words = newContent
-										.replace(/<[^>]*>/g, "")
-										.trim()
-										.split(/\s+/).length;
-									setWordCount(words);
-									return newContent;
-								});
-							}
-							if (parsed.section) {
-								setCurrentSection(parsed.section);
-							}
-						} catch (e) {
-							console.error("Error parsing JSON:", e);
-						}
-					}
-				}
-			}
-		} catch (error) {
-			console.error("Error:", error);
-		}
-		setIsLoading(false);
-	};
-
-	const handleToneAnalysis = async () => {
-		if (!sampleText.trim()) return;
-		setIsAnalyzingTone(true);
-		try {
-			const response = await fetch("/api/tone", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ sampleText }),
-			});
-			const data = await response.json();
-			if (data) {
-				setTone(data);
-			}
-		} catch (error) {
-			console.error("Error:", error);
-		}
-		setIsAnalyzingTone(false);
-	};
-
-	const handleCopyContent = async () => {
-		try {
-			await navigator.clipboard.writeText(streamedContent);
-			setShowCopied(true);
-			toast.success("Content copied to clipboard!");
-			setTimeout(() => setShowCopied(false), 2000);
-		} catch (err) {
-			toast.error("Failed to copy content");
-		}
-	};
-
-	const handleExportHTML = () => {
-		const htmlContent = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title || "Generated Content"}</title>
-    <style>
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            line-height: 1.6;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 2rem;
-            color: #333;
-        }
-        h1 { font-size: 2.5rem; margin-bottom: 1.5rem; }
-        h2 { font-size: 2rem; margin-top: 2rem; margin-bottom: 1rem; }
-        h3 { font-size: 1.5rem; margin-top: 1.5rem; margin-bottom: 0.75rem; }
-        p { margin-bottom: 1rem; }
-        ul, ol { margin-bottom: 1rem; padding-left: 2rem; }
-        li { margin-bottom: 0.5rem; }
-    </style>
-</head>
-<body>
-    ${streamedContent}
-</body>
-</html>`;
-
-		const blob = new Blob([htmlContent], { type: "text/html" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = `${title || "generated-content"}.html`;
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
-		toast.success("Content exported as HTML!");
-	};
-
-	const handleCompanyFormComplete = (info: {
-		name: string;
-		website: string;
-		description: string;
-		summary: string;
-	}) => {
-		setCompanyInfo(info);
-		console.log("INFO:", info);
-		setStep(1);
-	};
-
 	return (
-		<main className="min-h-screen p-4 md:p-8 max-w-5xl mx-auto">
-			<div className="flex justify-between items-center mb-8">
-				<h1 className="text-4xl md:text-5xl font-bold text-center bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-					AI Content Generator
-				</h1>
-
-				<div className="flex items-center gap-4">
-					<span className="text-sm text-gray-600">Welcome</span>
-					<a href="/api/auth/logout" className="btn-secondary text-sm">
-						Logout
-					</a>
-				</div>
-			</div>
-
-			{isLoading && step !== 4 && (
-				<div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50">
-					<div className="card p-6 flex items-center gap-3">
-						<div className="w-6 h-6 border-4 border-[var(--primary)] border-t-transparent rounded-full animate-spin" />
-						<span className="text-lg">Generating...</span>
+		<div className="flex flex-col min-h-screen">
+			{/* Hero Section */}
+			<section className="flex-1 flex flex-col lg:flex-row items-center justify-center gap-12 px-4 sm:px-6 lg:px-8 py-16 lg:py-24">
+				<div className="flex-1 max-w-2xl">
+					<h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-gray-900">
+						AI der <span className="text-blue-600">forstår din stemme</span>
+					</h1>
+					<p className="mt-6 text-lg text-gray-600">
+						Vores intelligente AI analyserer din skrivestil og tilpasser sig
+						automatisk for at matche din unikke tone. Du skal bare indtaste dit
+						indhold, og se hvordan vores AI skaber perfekt matchende indhold,
+						der lyder præcis som dig.
+					</p>
+					<div className="mt-8 flex flex-col sm:flex-row gap-4">
+						<Button asChild size="lg" className="text-lg" variant="secondary">
+							<Link href="/dashboard">
+								Prøv Det Nu <ArrowRight className="ml-2 h-5 w-5" />
+							</Link>
+						</Button>
 					</div>
 				</div>
-			)}
-
-			{step === 0 && (
-				<div className="card p-6">
-					<CompanyForm onComplete={handleCompanyFormComplete} />
-				</div>
-			)}
-
-			{step === 1 && (
-				<div className="card p-6 space-y-6">
-					<div className="flex justify-between items-center">
-						<h2 className="text-2xl font-semibold">Content Details</h2>
-						<button
-							onClick={() => setStep(0)}
-							className="btn-secondary text-sm">
-							← Back to Company Info
-						</button>
-					</div>
-					<form onSubmit={handleKeywordSubmit} className="space-y-6">
-						<div>
-							<label className="block text-sm font-medium mb-2 text-[var(--secondary)]">
-								Main Keyword
-							</label>
-							<input
-								type="text"
-								value={keyword}
-								onChange={(e) => setKeyword(e.target.value)}
-								className="input-field"
-								placeholder="Enter your main keyword or topic..."
-								required
-							/>
-						</div>
-
-						<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-							<div>
-								<label className="block text-sm font-medium mb-2 text-[var(--secondary)]">
-									Language
-								</label>
-								<select
-									value={language}
-									onChange={(e) => setLanguage(e.target.value)}
-									className="input-field"
-									required>
-									{LANGUAGES.map((lang) => (
-										<option key={lang.code} value={lang.code}>
-											{lang.name}
-										</option>
-									))}
-								</select>
-							</div>
-
-							<div>
-								<label className="block text-sm font-medium mb-2 text-[var(--secondary)]">
-									Target Country
-								</label>
-								<select
-									value={targetCountry}
-									onChange={(e) => setTargetCountry(e.target.value)}
-									className="input-field"
-									required>
-									{COUNTRIES.map((country) => (
-										<option key={country.code} value={country.code}>
-											{country.name}
-										</option>
-									))}
-								</select>
-							</div>
-						</div>
-
-						<div>
-							<label className="block text-sm font-medium mb-2 text-[var(--secondary)]">
-								Content Type
-							</label>
-							<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-								{CONTENT_TYPES.map((type) => (
-									<div
-										key={type.value}
-										className={`cursor-pointer p-3 rounded-lg border-2 transition-all ${
-											contentType === type.value
-												? "border-[var(--primary)] bg-[var(--primary)]/5"
-												: "border-gray-200 dark:border-gray-700 hover:border-[var(--primary)]/50"
-										}`}
-										onClick={() => setContentType(type.value)}>
-										<div className="flex items-center gap-2 mb-1">
-											<input
-												type="radio"
-												name="contentType"
-												value={type.value}
-												checked={contentType === type.value}
-												onChange={(e) => setContentType(e.target.value)}
-												className="text-[var(--primary)]"
-											/>
-											<span className="font-medium">{type.label}</span>
-										</div>
-										<p className="text-sm text-[var(--secondary)]">
-											{type.description}
-										</p>
-									</div>
-								))}
-							</div>
-						</div>
-
-						<div>
-							<label className="block text-sm font-medium mb-2 text-[var(--secondary)]">
-								Title{" "}
-								{title && (
-									<span className="text-[var(--primary)]">(AI Generated)</span>
-								)}
-							</label>
-							<div className="flex gap-3">
-								<input
-									type="text"
-									value={title}
-									onChange={(e) => setTitle(e.target.value)}
-									className="input-field flex-grow"
-									placeholder="Enter title or generate one..."
-									required
-								/>
-								<button
-									type="button"
-									onClick={handleGenerateTitle}
-									disabled={!keyword || isGeneratingTitle}
-									className="btn-secondary whitespace-nowrap">
-									{isGeneratingTitle ? (
-										<div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-									) : (
-										"Generate"
-									)}
-								</button>
-							</div>
-						</div>
-
-						<div>
-							<label className="block text-sm font-medium mb-2 text-[var(--secondary)]">
-								Sample Text for Tone Analysis (Optional)
-							</label>
-							<div className="space-y-3">
-								<textarea
-									value={sampleText}
-									onChange={(e) => setSampleText(e.target.value)}
-									className="input-field min-h-[100px]"
-									placeholder="Paste a sample of your content to analyze its tone and style..."
-								/>
-								<div className="flex flex-col gap-4">
-									<button
-										type="button"
-										onClick={handleToneAnalysis}
-										disabled={!sampleText.trim() || isAnalyzingTone}
-										className="btn-primary self-start">
-										{isAnalyzingTone ? (
-											<div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-										) : (
-											"Analyze Writing Style"
-										)}
-									</button>
-									{tone.tone && (
-										<div className="text-sm space-y-4 bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg">
-											<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-												<div>
-													<h3 className="font-semibold mb-1">Overall Tone</h3>
-													<p className="text-[var(--secondary)] whitespace-pre-wrap">
-														{tone.tone}
-													</p>
-												</div>
-												<div>
-													<h3 className="font-semibold mb-1">Writing Style</h3>
-													<p className="text-[var(--secondary)] whitespace-pre-wrap">
-														{tone.style}
-													</p>
-												</div>
-												<div>
-													<h3 className="font-semibold mb-1">
-														Voice Characteristics
-													</h3>
-													<p className="text-[var(--secondary)] whitespace-pre-wrap">
-														{tone.voice}
-													</p>
-												</div>
-												<div>
-													<h3 className="font-semibold mb-1">
-														Language Patterns
-													</h3>
-													<p className="text-[var(--secondary)] whitespace-pre-wrap">
-														{tone.language}
-													</p>
-												</div>
-												<div className="md:col-span-2">
-													<h3 className="font-semibold mb-1">
-														Engagement Elements
-													</h3>
-													<p className="text-[var(--secondary)] whitespace-pre-wrap">
-														{tone.engagement}
-													</p>
-												</div>
-											</div>
-										</div>
-									)}
-								</div>
-							</div>
-						</div>
-
-						<div>
-							<label className="block text-sm font-medium mb-2 text-[var(--secondary)]">
-								Related Keywords (Optional)
-							</label>
-							<div className="flex gap-2 mb-3">
-								<button
-									type="button"
-									onClick={handleGenerateKeywords}
-									disabled={!keyword || isGeneratingKeywords}
-									className="btn-primary whitespace-nowrap">
-									{isGeneratingKeywords ? (
-										<div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-									) : (
-										"Generate Keywords"
-									)}
-								</button>
-							</div>
-
-							<div className="flex flex-wrap gap-2 mb-3">
-								{relatedKeywords.map((kw, index) => (
-									<span key={index} className="tag group">
-										{kw}
-										<button
-											type="button"
-											onClick={() => removeKeyword(index)}
-											className="ml-2 text-[var(--secondary)] hover:text-red-500 transition-colors">
-											×
-										</button>
-									</span>
-								))}
-							</div>
-
-							<div className="flex gap-2">
-								<input
-									type="text"
-									value={newKeyword}
-									onChange={(e) => setNewKeyword(e.target.value)}
-									className="input-field"
-									placeholder="Add a custom keyword"
-									onKeyPress={(e) => {
-										if (e.key === "Enter") {
-											e.preventDefault();
-											if (newKeyword.trim()) {
-												setRelatedKeywords((prev) => [
-													...prev,
-													newKeyword.trim(),
-												]);
-												setNewKeyword("");
-											}
-										}
-									}}
-								/>
-								<button
-									type="button"
-									onClick={() => {
-										if (newKeyword.trim()) {
-											setRelatedKeywords((prev) => [
-												...prev,
-												newKeyword.trim(),
-											]);
-											setNewKeyword("");
-										}
-									}}
-									className="btn-primary whitespace-nowrap"
-									disabled={!newKeyword.trim()}>
-									Add
-								</button>
-							</div>
-						</div>
-
-						<button
-							type="submit"
-							disabled={!keyword || !title}
-							className="btn-primary w-full">
-							Continue
-						</button>
-					</form>
-				</div>
-			)}
-
-			{step === 2 && (
-				<div className="card p-6 space-y-6">
-					<div className="flex justify-between items-center">
-						<h2 className="text-2xl font-semibold">Article Outline</h2>
-						<button
-							onClick={() => setStep(1)}
-							className="btn-secondary text-sm">
-							← Back
-						</button>
-					</div>
-
-					{outline.length > 0 ? (
-						<>
-							<div className="space-y-3">
-								{outline.map((item, index) => (
-									<div
-										key={index}
-										className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg group">
-										<div className="flex items-center gap-2">
-											{index > 0 && (
-												<button
-													onClick={() => {
-														const newOutline = [...outline];
-														[newOutline[index], newOutline[index - 1]] = [
-															newOutline[index - 1],
-															newOutline[index],
-														];
-														setOutline(newOutline);
-													}}
-													className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--secondary)] hover:text-[var(--primary)]"
-													title="Move up">
-													↑
-												</button>
-											)}
-											{index < outline.length - 1 && (
-												<button
-													onClick={() => {
-														const newOutline = [...outline];
-														[newOutline[index], newOutline[index + 1]] = [
-															newOutline[index + 1],
-															newOutline[index],
-														];
-														setOutline(newOutline);
-													}}
-													className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--secondary)] hover:text-[var(--primary)]"
-													title="Move down">
-													↓
-												</button>
-											)}
-										</div>
-										<span className="font-mono text-[var(--primary)] font-semibold min-w-[1.5rem]">
-											{index + 1}.
-										</span>
-										{editingIndex === index ? (
-											<div className="flex-1 flex gap-2">
-												<input
-													type="text"
-													value={item}
-													onChange={(e) => {
-														const newOutline = [...outline];
-														newOutline[index] = e.target.value;
-														setOutline(newOutline);
-													}}
-													onKeyDown={(e) => {
-														if (e.key === "Enter") {
-															setEditingIndex(null);
-														} else if (e.key === "Escape") {
-															setEditingIndex(null);
-														}
-													}}
-													className="input-field flex-1"
-													autoFocus
-												/>
-												<button
-													onClick={() => setEditingIndex(null)}
-													className="btn-secondary text-sm">
-													Done
-												</button>
-											</div>
-										) : (
-											<div className="flex-1 flex justify-between items-start">
-												<span className="flex-1">{item}</span>
-												<div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-													<button
-														onClick={() => setEditingIndex(index)}
-														className="text-[var(--secondary)] hover:text-[var(--primary)]"
-														title="Edit">
-														✎
-													</button>
-													<button
-														onClick={() => {
-															const newOutline = outline.filter(
-																(_, i) => i !== index
-															);
-															setOutline(newOutline);
-														}}
-														className="text-[var(--secondary)] hover:text-red-500"
-														title="Delete">
-														×
-													</button>
-												</div>
-											</div>
-										)}
-									</div>
-								))}
-							</div>
-							<div className="flex gap-2">
-								<button
-									onClick={() => {
-										setOutline([...outline, "New section"]);
-										setEditingIndex(outline.length);
-									}}
-									className="btn-secondary">
-									Add Section
-								</button>
-								<button
-									onClick={handleContentGeneration}
-									className="btn-primary flex-1">
-									Generate Content
-								</button>
-							</div>
-						</>
-					) : (
-						<div className="text-center py-8">
-							<div className="w-8 h-8 border-4 border-[var(--primary)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-							<p className="text-[var(--secondary)]">Generating outline...</p>
-						</div>
-					)}
-				</div>
-			)}
-
-			{step === 3 && (
-				<div className="space-y-6">
-					<div className="flex items-center justify-between mb-4">
-						<h2 className="text-2xl font-semibold">Generated Content</h2>
-						<div className="flex items-center gap-3">
-							<div className="text-sm text-[var(--secondary)]">
-								{wordCount} words written
-							</div>
-							{streamedContent && (
-								<div className="flex gap-2">
-									<button
-										onClick={handleCopyContent}
-										className="btn-secondary text-sm flex items-center gap-1"
-										title="Copy to clipboard">
-										{showCopied ? (
-											<>
-												<svg
-													className="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24">
-													<path
-														strokeLinecap="round"
-														strokeLinejoin="round"
-														strokeWidth={2}
-														d="M5 13l4 4L19 7"
-													/>
-												</svg>
-												Copied!
-											</>
-										) : (
-											<>
-												<svg
-													className="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24">
-													<path
-														strokeLinecap="round"
-														strokeLinejoin="round"
-														strokeWidth={2}
-														d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
-													/>
-												</svg>
-												Copy
-											</>
-										)}
-									</button>
-									<button
-										onClick={handleExportHTML}
-										className="btn-secondary text-sm flex items-center gap-1"
-										title="Export as HTML">
-										<svg
-											className="w-4 h-4"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24">
-											<path
-												strokeLinecap="round"
-												strokeLinejoin="round"
-												strokeWidth={2}
-												d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-											/>
-										</svg>
-										Export
-									</button>
-								</div>
-							)}
-						</div>
-					</div>
-
-					<div className="card p-6 md:p-8">
-						{isLoading ? (
+				<div className="flex-1 max-w-lg w-full">
+					<div className="relative">
+						<div className="absolute -inset-1 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 opacity-75 blur"></div>
+						<div className="relative bg-white rounded-lg shadow-xl p-6">
 							<div className="space-y-4">
-								<div className="text-center py-4">
-									<div className="w-8 h-8 border-4 border-[var(--primary)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-									<p className="text-[var(--secondary)] mb-2">
-										{currentSection
-											? `Generating ${currentSection}...`
-											: "Preparing content..."}
-									</p>
-									{wordCount > 0 && (
-										<p className="text-sm text-[var(--secondary)]">
-											{wordCount} words generated
-										</p>
-									)}
+								<div className="flex items-center gap-3 mb-6">
+									<div className="w-2 h-2 rounded-full bg-green-500"></div>
+									<span className="text-sm text-gray-600">
+										AI Analyserer Tone...
+									</span>
 								</div>
-								{streamedContent && (
-									<div className="prose prose-lg dark:prose-invert max-w-none">
-										<div
-											dangerouslySetInnerHTML={{ __html: streamedContent }}
-										/>
+								<div className="h-4 w-3/4 bg-gray-200 rounded animate-pulse"></div>
+								<div className="h-4 w-full bg-gray-200 rounded animate-pulse"></div>
+								<div className="h-4 w-5/6 bg-gray-200 rounded animate-pulse"></div>
+								<div className="h-4 w-full bg-gray-200 rounded animate-pulse"></div>
+								<div className="mt-4 p-3 bg-blue-50 rounded-lg">
+									<p className="text-sm text-blue-700">
+										Registreret Stil: Professionel & Kortfattet
+									</p>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			{/* Features Section */}
+			<section className="bg-gray-50 py-16 lg:py-24 px-4 sm:px-6 lg:px-8">
+				<div className="max-w-7xl mx-auto">
+					<div className="text-center mb-12">
+						<h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">
+							Kraftfulde Funktioner til Indholdsproduktion
+						</h2>
+						<p className="mt-4 text-lg text-gray-600">
+							Alt hvad du behøver for at skabe og administrere indhold der
+							konverterer
+						</p>
+					</div>
+
+					<div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+						<Card>
+							<CardHeader>
+								<Sparkles className="h-12 w-12 text-blue-600 mb-4" />
+								<CardTitle>AI-Drevet Generering</CardTitle>
+								<CardDescription>
+									Generer indhold af høj kvalitet med avanceret AI-teknologi
+								</CardDescription>
+							</CardHeader>
+						</Card>
+
+						<Card>
+							<CardHeader>
+								<PenTool className="h-12 w-12 text-blue-600 mb-4" />
+								<CardTitle>Avanceret Teksteditor</CardTitle>
+								<CardDescription>
+									Rediger og formater dit indhold med vores intuitive editor
+								</CardDescription>
+							</CardHeader>
+						</Card>
+
+						<Card>
+							<CardHeader>
+								<RefreshCcw className="h-12 w-12 text-blue-600 mb-4" />
+								<CardTitle>Omskrivning af Indhold</CardTitle>
+								<CardDescription>
+									Omskriv og optimer eksisterende indhold uden besvær
+								</CardDescription>
+							</CardHeader>
+						</Card>
+
+						<Card>
+							<CardHeader>
+								<LayoutGrid className="h-12 w-12 text-blue-600 mb-4" />
+								<CardTitle>Indholdsoversigt</CardTitle>
+								<CardDescription>
+									Administrer alt dit indhold på ét centralt sted
+								</CardDescription>
+							</CardHeader>
+						</Card>
+					</div>
+				</div>
+			</section>
+
+			{/* How It Works Section */}
+			<section className="py-16 lg:py-24 px-4 sm:px-6 lg:px-8">
+				<div className="max-w-7xl mx-auto">
+					<div className="text-center mb-16">
+						<h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">
+							Sådan Fungerer Det
+						</h2>
+						<p className="mt-4 text-lg text-gray-600">
+							Lad vores AI lære og matche din skrivestil
+						</p>
+					</div>
+
+					<div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+						<div className="relative">
+							<div className="absolute top-0 right-0 -mr-6 mt-8 hidden lg:block">
+								<div className="w-24 h-0.5 bg-blue-600"></div>
+								<div className="absolute right-0 -mr-2 -mt-2 w-4 h-4 rounded-full border-2 border-blue-600 bg-white"></div>
+							</div>
+							<Card className="relative h-full">
+								<CardHeader>
+									<div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-4">
+										<Target className="h-6 w-6 text-blue-600" />
 									</div>
-								)}
-							</div>
-						) : streamedContent ? (
-							<div className="prose prose-lg dark:prose-invert max-w-none">
-								<div dangerouslySetInnerHTML={{ __html: streamedContent }} />
-							</div>
-						) : (
-							<div className="text-center py-8 text-[var(--secondary)]">
-								No content generated yet. Please wait...
-							</div>
-						)}
-					</div>
-				</div>
-			)}
+									<CardTitle>1. Indtast Dit Indhold</CardTitle>
+									<CardDescription>
+										Giv et eksempel på dit eksisterende indhold eller skrivestil
+									</CardDescription>
+								</CardHeader>
+							</Card>
+						</div>
 
-			{step === 4 && (
-				<div className="card p-6 space-y-6">
-					<div className="flex justify-between items-center mb-4">
-						<div>
-							<h2 className="text-2xl font-semibold">Generated Content</h2>
-							{wordCount > 0 && (
-								<p className="text-sm text-[var(--secondary)]">
-									Word count: {wordCount}
-								</p>
-							)}
+						<div className="relative">
+							<div className="absolute top-0 right-0 -mr-6 mt-8 hidden lg:block">
+								<div className="w-24 h-0.5 bg-blue-600"></div>
+								<div className="absolute right-0 -mr-2 -mt-2 w-4 h-4 rounded-full border-2 border-blue-600 bg-white"></div>
+							</div>
+							<Card className="relative h-full">
+								<CardHeader>
+									<div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-4">
+										<Wand2 className="h-6 w-6 text-blue-600" />
+									</div>
+									<CardTitle>2. AI Analyse</CardTitle>
+									<CardDescription>
+										Vores AI analyserer og lærer din unikke skrivestil og tone
+									</CardDescription>
+								</CardHeader>
+							</Card>
 						</div>
-						<div className="flex items-center gap-3">
-							{streamedContent && (
-								<div className="flex gap-2">
-									<button
-										onClick={handleCopyContent}
-										className="btn-secondary text-sm flex items-center gap-1"
-										title="Copy to clipboard">
-										{showCopied ? (
-											<>
-												<svg
-													className="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24">
-													<path
-														strokeLinecap="round"
-														strokeLinejoin="round"
-														strokeWidth={2}
-														d="M5 13l4 4L19 7"
-													/>
-												</svg>
-												Copied!
-											</>
-										) : (
-											<>
-												<svg
-													className="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24">
-													<path
-														strokeLinecap="round"
-														strokeLinejoin="round"
-														strokeWidth={2}
-														d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
-													/>
-												</svg>
-												Copy
-											</>
-										)}
-									</button>
-									<button
-										onClick={handleExportHTML}
-										className="btn-secondary text-sm flex items-center gap-1"
-										title="Export as HTML">
-										<svg
-											className="w-4 h-4"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24">
-											<path
-												strokeLinecap="round"
-												strokeLinejoin="round"
-												strokeWidth={2}
-												d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-											/>
-										</svg>
-										Export
-									</button>
+
+						<div className="relative">
+							<div className="absolute top-0 right-0 -mr-6 mt-8 hidden lg:block">
+								<div className="w-24 h-0.5 bg-blue-600"></div>
+								<div className="absolute right-0 -mr-2 -mt-2 w-4 h-4 rounded-full border-2 border-blue-600 bg-white"></div>
+							</div>
+							<Card className="relative h-full">
+								<CardHeader>
+									<div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-4">
+										<Edit3 className="h-6 w-6 text-blue-600" />
+									</div>
+									<CardTitle>3. Generer Indhold</CardTitle>
+									<CardDescription>
+										Få AI-genereret indhold der matcher din præcise tone og stil
+									</CardDescription>
+								</CardHeader>
+							</Card>
+						</div>
+
+						<Card className="relative h-full">
+							<CardHeader>
+								<div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mb-4">
+									<CheckCircle2 className="h-6 w-6 text-blue-600" />
 								</div>
-							)}
-							<button
-								onClick={() => setStep(3)}
-								className="btn-secondary text-sm">
-								← Back
-							</button>
-						</div>
+								<CardTitle>4. Gennemgå & Publicer</CardTitle>
+								<CardDescription>
+									Foretag eventuelle sidste justeringer og publicer dit perfekt
+									matchende indhold
+								</CardDescription>
+							</CardHeader>
+						</Card>
 					</div>
 
-					{isLoading ? (
-						<div className="space-y-4">
-							<div className="text-center py-4">
-								<div className="w-8 h-8 border-4 border-[var(--primary)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-								<p className="text-[var(--secondary)] mb-2">
-									{currentSection
-										? `Generating ${currentSection}...`
-										: "Preparing content..."}
-								</p>
-								{wordCount > 0 && (
-									<p className="text-sm text-[var(--secondary)]">
-										{wordCount} words generated
-									</p>
-								)}
-							</div>
-							{streamedContent && (
-								<div className="prose prose-lg dark:prose-invert max-w-none">
-									<div dangerouslySetInnerHTML={{ __html: streamedContent }} />
-								</div>
-							)}
-						</div>
-					) : streamedContent ? (
-						<div className="prose prose-lg dark:prose-invert max-w-none">
-							<div dangerouslySetInnerHTML={{ __html: streamedContent }} />
-						</div>
-					) : (
-						<div className="text-center py-8 text-[var(--secondary)]">
-							No content generated yet. Please wait...
-						</div>
-					)}
+					<div className="mt-16 text-center">
+						<p className="text-lg text-gray-600 mb-8">
+							Ikke mere valg af toneindstillinger - vores AI registrerer og
+							matcher automatisk din skrivestil, hvilket gør indholdsproduktion
+							ubesværet og autentisk.
+						</p>
+						<Button asChild size="lg" variant="secondary">
+							<Link href="/dashboard">
+								Se Det I Aktion <ArrowRight className="ml-2 h-5 w-5" />
+							</Link>
+						</Button>
+					</div>
 				</div>
-			)}
-		</main>
+			</section>
+
+			{/* Content Customization Section - Replace with AI Analysis Section */}
+			<section className="bg-white py-16 lg:py-24 px-4 sm:px-6 lg:px-8">
+				<div className="max-w-7xl mx-auto">
+					<div className="text-center mb-16">
+						<h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">
+							Smart Tonegenkendelse
+						</h2>
+						<p className="mt-4 text-lg text-gray-600">
+							Vores AI analyserer og forstår automatisk flere aspekter af din
+							skrivning
+						</p>
+					</div>
+
+					<div className="grid md:grid-cols-2 gap-8 lg:gap-12">
+						<div className="space-y-8">
+							<Card className="border-2 border-blue-100">
+								<CardHeader>
+									<div className="flex items-center gap-4">
+										<div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+											<MessageSquare className="h-6 w-6 text-blue-600" />
+										</div>
+										<div>
+											<CardTitle>Skrivestilsanalyse</CardTitle>
+											<CardDescription className="mt-2">
+												Vores AI registrerer nøgleaspekter af din skrivning:
+											</CardDescription>
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent>
+									<div className="space-y-3">
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">
+												Formalitetsniveau
+											</span>
+											<div className="mt-1 h-2 bg-gray-200 rounded-full">
+												<div className="w-3/4 h-2 bg-blue-600 rounded-full"></div>
+											</div>
+										</div>
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">Teknisk Dybde</span>
+											<div className="mt-1 h-2 bg-gray-200 rounded-full">
+												<div className="w-1/2 h-2 bg-blue-600 rounded-full"></div>
+											</div>
+										</div>
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">
+												Engagementsstil
+											</span>
+											<div className="mt-1 h-2 bg-gray-200 rounded-full">
+												<div className="w-4/5 h-2 bg-blue-600 rounded-full"></div>
+											</div>
+										</div>
+									</div>
+								</CardContent>
+							</Card>
+
+							<Card className="border-2 border-blue-100">
+								<CardHeader>
+									<div className="flex items-center gap-4">
+										<div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+											<Settings2 className="h-6 w-6 text-blue-600" />
+										</div>
+										<div>
+											<CardTitle>Mønstergenkendelse</CardTitle>
+											<CardDescription className="mt-2">
+												AI identificerer dine unikke skrivemønstre
+											</CardDescription>
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent>
+									<div className="space-y-3">
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">
+												Sætningsstruktur
+											</span>
+											<p className="mt-1 text-sm text-gray-600">
+												Analyse af din typiske sætningslængde og kompleksitet
+											</p>
+										</div>
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">Ordforråd</span>
+											<p className="mt-1 text-sm text-gray-600">
+												Forståelse af dine ordvalg og branchetermer
+											</p>
+										</div>
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">Indholdsflow</span>
+											<p className="mt-1 text-sm text-gray-600">
+												Genkendelse af din afsnitsstruktur og overgange
+											</p>
+										</div>
+									</div>
+								</CardContent>
+							</Card>
+						</div>
+
+						<div className="space-y-8">
+							<Card className="border-2 border-blue-100">
+								<CardHeader>
+									<div className="flex items-center gap-4">
+										<div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+											<Globe2 className="h-6 w-6 text-blue-600" />
+										</div>
+										<div>
+											<CardTitle>Kontekstuel Forståelse</CardTitle>
+											<CardDescription className="mt-2">
+												Dyb forståelse af din indholdskontekst
+											</CardDescription>
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent>
+									<div className="space-y-3">
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">
+												Branchekontekst
+											</span>
+											<p className="mt-1 text-sm text-gray-600">
+												Tilpasser sig din specifikke brancheterminologi og
+												standarder
+											</p>
+										</div>
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">
+												Målgruppeniveau
+											</span>
+											<p className="mt-1 text-sm text-gray-600">
+												Matcher indhold til din målgruppes forståelsesniveau
+											</p>
+										</div>
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">
+												Brandidentitet
+											</span>
+											<p className="mt-1 text-sm text-gray-600">
+												Opretholder konsistens med din brands personlighed
+											</p>
+										</div>
+									</div>
+								</CardContent>
+							</Card>
+
+							<Card className="border-2 border-blue-100">
+								<CardHeader>
+									<div className="flex items-center gap-4">
+										<div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+											<Lightbulb className="h-6 w-6 text-blue-600" />
+										</div>
+										<div>
+											<CardTitle>Kontinuerlig Læring</CardTitle>
+											<CardDescription className="mt-2">
+												AI der udvikler sig med din skrivestil
+											</CardDescription>
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent>
+									<div className="space-y-3">
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">Stiludvikling</span>
+											<p className="mt-1 text-sm text-gray-600">
+												Tilpasser sig efterhånden som din skrivestil udvikler
+												sig
+											</p>
+										</div>
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">
+												Indholdshistorik
+											</span>
+											<p className="mt-1 text-sm text-gray-600">
+												Lærer af din indholdsproduktionshistorik
+											</p>
+										</div>
+										<div className="p-3 rounded-lg bg-gray-50">
+											<span className="text-sm font-medium">
+												Feedback Integration
+											</span>
+											<p className="mt-1 text-sm text-gray-600">
+												Integrerer dine redigeringer og præferencer
+											</p>
+										</div>
+									</div>
+								</CardContent>
+							</Card>
+						</div>
+					</div>
+
+					<div className="mt-16 text-center">
+						<p className="text-lg text-gray-600 mb-8">
+							Oplev kraften i AI, der virkelig forstår din stemme. Intet manuelt
+							stilvalg nødvendigt - bare skriv naturligt, og lad vores AI klare
+							resten.
+						</p>
+						<Button asChild size="lg" variant="outline">
+							<Link href="/dashboard">
+								Prøv AI Stilgenkendelse <ArrowRight className="ml-2 h-5 w-5" />
+							</Link>
+						</Button>
+					</div>
+				</div>
+			</section>
+
+			{/* CTA Section */}
+			<section className="bg-gray-50 py-16 lg:py-24 px-4 sm:px-6 lg:px-8">
+				<div className="max-w-7xl mx-auto text-center">
+					<h2 className="text-3xl font-bold text-gray-900 sm:text-4xl mb-8">
+						Klar til at Skabe Indhold Der Lyder Som Dig?
+					</h2>
+					<Button asChild size="lg" className="text-lg" variant="secondary">
+						<Link href="/dashboard">
+							Kom I Gang Nu <ArrowRight className="ml-2 h-5 w-5" />
+						</Link>
+					</Button>
+				</div>
+			</section>
+		</div>
 	);
 }
