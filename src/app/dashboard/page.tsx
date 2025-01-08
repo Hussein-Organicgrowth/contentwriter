@@ -5,22 +5,28 @@ import connectToDatabase from "@/lib/mongodb";
 import { Suspense } from "react";
 
 async function getWebsites() {
-	const user = await currentUser();
-	await connectToDatabase();
+  const user = await currentUser();
+  await connectToDatabase();
 
-	const websiteDocs = await Website.find({ userId: user?.id }).sort({
-		createdAt: -1,
-	});
+  const [ownedWebsites, sharedWebsites] = await Promise.all([
+    Website.find({ userId: user?.id }).sort({ createdAt: -1 }),
+    Website.find({ sharedUsers: user?.emailAddresses[0]?.emailAddress }).sort({
+      createdAt: -1,
+    }),
+  ]);
 
-	return JSON.parse(JSON.stringify(websiteDocs));
+  return {
+    websites: JSON.parse(JSON.stringify(ownedWebsites)),
+    sharedWebsites: JSON.parse(JSON.stringify(sharedWebsites)),
+  };
 }
 
 export default async function DashboardPage() {
-	const websites = await getWebsites();
+  const { websites, sharedWebsites } = await getWebsites();
 
-	return (
-		<Suspense fallback={<div>Loading...</div>}>
-			<Dashboard websites={websites} />
-		</Suspense>
-	);
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <Dashboard websites={websites} sharedWebsites={sharedWebsites} />
+    </Suspense>
+  );
 }

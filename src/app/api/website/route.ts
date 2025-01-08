@@ -4,98 +4,108 @@ import connectToDatabase from "@/lib/mongodb";
 import { currentUser } from "@clerk/nextjs/server";
 
 export async function POST(request: Request) {
-	try {
-		const user = await currentUser();
+  try {
+    const user = await currentUser();
 
-		if (!user) {
-			return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-		}
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-		await connectToDatabase();
-		const { name, website, description, summary, toneofvoice, targetAudience } =
-			await request.json();
+    await connectToDatabase();
+    const { name, website, description, summary, toneofvoice, targetAudience } =
+      await request.json();
 
-		const websiteDoc = await Website.create({
-			name,
-			website,
-			description,
-			summary,
-			content: [], // Initialize with empty content
-			toneofvoice, // Add tone of voice
-			targetAudience, // Add target audience
-			userId: user.id, // Add the authenticated user's ID
-		});
+    const websiteDoc = await Website.create({
+      name,
+      website,
+      description,
+      summary,
+      content: [], // Initialize with empty content
+      toneofvoice, // Add tone of voice
+      targetAudience, // Add target audience
+      userId: user.id, // Add the authenticated user's ID
+    });
 
-		return NextResponse.json({ website: websiteDoc }, { status: 201 });
-	} catch (error) {
-		console.error("Error creating website:", error);
-		return NextResponse.json(
-			{ error: "Failed to create website" },
-			{ status: 500 }
-		);
-	}
+    return NextResponse.json({ website: websiteDoc }, { status: 201 });
+  } catch (error) {
+    console.error("Error creating website:", error);
+    return NextResponse.json(
+      { error: "Failed to create website" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function GET(request: Request) {
-	try {
-		const user = await currentUser();
+  try {
+    const user = await currentUser();
 
-		if (!user) {
-			return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-		}
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-		await connectToDatabase();
+    await connectToDatabase();
 
-		// Get all websites for the authenticated user
-		const websites = await Website.find({ userId: user.id }).sort({
-			createdAt: -1,
-		});
+    // Get all websites owned by the user
+    const ownedWebsites = await Website.find({ userId: user.id }).sort({
+      createdAt: -1,
+    });
 
-		return NextResponse.json({ websites }, { status: 200 });
-	} catch (error) {
-		console.error("Error fetching websites:", error);
-		return NextResponse.json(
-			{ error: "Failed to fetch websites" },
-			{ status: 500 }
-		);
-	}
+    // Get all websites shared with the user's email
+    const sharedWebsites = await Website.find({
+      sharedUsers: user.emailAddresses[0]?.emailAddress,
+    }).sort({
+      createdAt: -1,
+    });
+
+    return NextResponse.json(
+      { websites: ownedWebsites, sharedWebsites },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error("Error fetching websites:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch websites" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function DELETE(request: Request) {
-	try {
-		const user = await currentUser();
+  try {
+    const user = await currentUser();
 
-		if (!user) {
-			return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-		}
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-		await connectToDatabase();
-		const { searchParams } = new URL(request.url);
-		const websiteId = searchParams.get("id");
+    await connectToDatabase();
+    const { searchParams } = new URL(request.url);
+    const websiteId = searchParams.get("id");
 
-		if (!websiteId) {
-			return NextResponse.json(
-				{ error: "Website ID is required" },
-				{ status: 400 }
-			);
-		}
+    if (!websiteId) {
+      return NextResponse.json(
+        { error: "Website ID is required" },
+        { status: 400 }
+      );
+    }
 
-		// Find and delete the website, ensuring it belongs to the current user
-		const deletedWebsite = await Website.findOneAndDelete({
-			_id: websiteId,
-			userId: user.id,
-		});
+    // Find and delete the website, ensuring it belongs to the current user
+    const deletedWebsite = await Website.findOneAndDelete({
+      _id: websiteId,
+      userId: user.id,
+    });
 
-		if (!deletedWebsite) {
-			return NextResponse.json({ error: "Website not found" }, { status: 404 });
-		}
+    if (!deletedWebsite) {
+      return NextResponse.json({ error: "Website not found" }, { status: 404 });
+    }
 
-		return NextResponse.json({ success: true }, { status: 200 });
-	} catch (error) {
-		console.error("Error deleting website:", error);
-		return NextResponse.json(
-			{ error: "Failed to delete website" },
-			{ status: 500 }
-		);
-	}
+    return NextResponse.json({ success: true }, { status: 200 });
+  } catch (error) {
+    console.error("Error deleting website:", error);
+    return NextResponse.json(
+      { error: "Failed to delete website" },
+      { status: 500 }
+    );
+  }
 }
