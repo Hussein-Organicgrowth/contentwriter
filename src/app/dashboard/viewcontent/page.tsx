@@ -91,10 +91,13 @@ interface Folder {
 }
 
 interface Website {
+  _id: string;
   name: string;
   content: Content[];
-  sharedWebsites?: Website[];
-  folders?: Folder[];
+  folders: Folder[];
+  toneofvoice: string;
+  userId: string;
+  sharedWith: string[];
 }
 
 export default function ViewContent() {
@@ -123,23 +126,51 @@ export default function ViewContent() {
         throw new Error("No company selected");
       }
 
+      console.log("Fetching content for company:", companyName);
       const response = await fetch("/api/website");
       const data = await response.json();
 
-      if (data.websites) {
-        const website =
-          data.websites.find(
-            (w: Website) => w.name.toLowerCase() === companyName.toLowerCase()
-          ) ||
-          data.sharedWebsites?.find(
-            (w: Website) => w.name.toLowerCase() === companyName.toLowerCase()
-          );
+      console.log("API Response:", data);
+      console.log(
+        "Owned websites:",
+        data.websites?.map((w: Website) => w.name)
+      );
+      console.log(
+        "Shared websites:",
+        data.sharedWebsites?.map((w: Website) => w.name)
+      );
 
-        if (website) {
-          setItems(website.content || []);
-          setFolders(website.folders || []);
-        }
+      if (!data.websites && !data.sharedWebsites) {
+        console.log("No websites found");
+        return;
       }
+
+      // Find the website in either owned or shared websites
+      const website =
+        data.websites?.find(
+          (w: Website) => w.name.toLowerCase() === companyName.toLowerCase()
+        ) ||
+        data.sharedWebsites?.find(
+          (w: Website) => w.name.toLowerCase() === companyName.toLowerCase()
+        );
+
+      if (!website) {
+        console.log("Website not found:", companyName);
+        console.log(
+          "Available websites:",
+          [...(data.websites || []), ...(data.sharedWebsites || [])].map(
+            (w: Website) => w.name
+          )
+        );
+        toast.error("Website not found");
+        return;
+      }
+
+      console.log("Found website:", website.name);
+      console.log("Website content:", website.content?.length || 0, "items");
+      console.log("Website folders:", website.folders?.length || 0, "folders");
+      setItems(website.content || []);
+      setFolders(website.folders || []);
     } catch (error) {
       console.error("Error fetching content:", error);
       toast.error("Failed to fetch content");

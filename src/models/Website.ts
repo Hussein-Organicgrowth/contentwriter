@@ -20,7 +20,7 @@ export interface IWebsite extends mongoose.Document {
     createdAt: string;
   }>;
   userId: string;
-  sharedWith: string[];
+  sharedUsers: string[];
 }
 
 const websiteSchema = new mongoose.Schema({
@@ -47,7 +47,7 @@ const websiteSchema = new mongoose.Schema({
     },
   ],
   userId: { type: String, required: true },
-  sharedWith: [String],
+  sharedUsers: { type: [String], default: [] },
 });
 
 export const Website =
