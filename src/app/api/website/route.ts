@@ -1,67 +1,24 @@
 import { NextResponse } from "next/server";
-import { Website } from "@/models/Website";
 import connectToDatabase from "@/lib/mongodb";
+import { Website } from "@/models/Website";
+
 import { currentUser } from "@clerk/nextjs/server";
 
-export async function POST(request: Request) {
+export async function GET() {
   try {
+    await connectToDatabase();
     const user = await currentUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    await connectToDatabase();
-    const { name, website, description, summary, toneofvoice, targetAudience } =
-      await request.json();
-
-    const websiteDoc = await Website.create({
-      name,
-      website,
-      description,
-      summary,
-      content: [], // Initialize with empty content
-      toneofvoice, // Add tone of voice
-      targetAudience, // Add target audience
-      userId: user.id, // Add the authenticated user's ID
-    });
-
-    return NextResponse.json({ website: websiteDoc }, { status: 201 });
-  } catch (error) {
-    console.error("Error creating website:", error);
-    return NextResponse.json(
-      { error: "Failed to create website" },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET(request: Request) {
-  try {
-    const user = await currentUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    await connectToDatabase();
-
-    // Get all websites owned by the user
-    const ownedWebsites = await Website.find({ userId: user.id }).sort({
-      createdAt: -1,
-    });
-
-    // Get all websites shared with the user's email
+    const websites = await Website.find({ userId: user.id });
     const sharedWebsites = await Website.find({
-      sharedUsers: user.emailAddresses[0]?.emailAddress,
-    }).sort({
-      createdAt: -1,
+      sharedWith: user.emailAddresses[0]?.emailAddress,
     });
 
-    return NextResponse.json(
-      { websites: ownedWebsites, sharedWebsites },
-      { status: 200 }
-    );
+    return NextResponse.json({ websites, sharedWebsites });
   } catch (error) {
     console.error("Error fetching websites:", error);
     return NextResponse.json(
@@ -71,40 +28,63 @@ export async function GET(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
+export async function POST(req: Request) {
   try {
     const user = await currentUser();
-
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const { action, websiteName, folderId, folderName, content } =
+      await req.json();
+
     await connectToDatabase();
-    const { searchParams } = new URL(request.url);
-    const websiteId = searchParams.get("id");
-
-    if (!websiteId) {
-      return NextResponse.json(
-        { error: "Website ID is required" },
-        { status: 400 }
-      );
-    }
-
-    // Find and delete the website, ensuring it belongs to the current user
-    const deletedWebsite = await Website.findOneAndDelete({
-      _id: websiteId,
-      userId: user.id,
+    const website = await Website.findOne({
+      name: websiteName,
+      $or: [
+        { userId: user.id },
+        { sharedWith: user.emailAddresses[0]?.emailAddress },
+      ],
     });
 
-    if (!deletedWebsite) {
+    if (!website) {
       return NextResponse.json({ error: "Website not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true }, { status: 200 });
+    switch (action) {
+      case "createFolder":
+        const newFolder = {
+          id: Date.now().toString(),
+          name: folderName,
+          createdAt: new Date().toISOString(),
+        };
+        website.folders.push(newFolder);
+        break;
+
+      case "deleteFolder":
+        // Move all content from this folder back to "All Content"
+        website.content = website.content.map((item: any) =>
+          item.folderId === folderId ? { ...item, folderId: null } : item
+        );
+        website.folders = website.folders.filter((f: any) => f.id !== folderId);
+        break;
+
+      case "moveContent":
+        website.content = website.content.map((item: any) =>
+          content.includes(item._id) ? { ...item, folderId } : item
+        );
+        break;
+
+      default:
+        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    }
+
+    await website.save();
+    return NextResponse.json({ success: true, website });
   } catch (error) {
-    console.error("Error deleting website:", error);
+    console.error("Error updating website:", error);
     return NextResponse.json(
-      { error: "Failed to delete website" },
+      { error: "Failed to update website" },
       { status: 500 }
     );
   }

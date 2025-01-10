@@ -13,7 +13,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Search, ArrowUpDown, Plus, Trash2 } from "lucide-react";
+import {
+  Search,
+  ArrowUpDown,
+  Plus,
+  Trash2,
+  Folder,
+  FolderPlus,
+  X,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Card,
@@ -52,8 +60,17 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface Content {
   _id: string;
@@ -64,6 +81,20 @@ interface Content {
   contentType: string;
   mainKeyword: string;
   relatedKeywords: string[];
+  folderId?: string | null;
+}
+
+interface Folder {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+interface Website {
+  name: string;
+  content: Content[];
+  sharedWebsites?: Website[];
+  folders?: Folder[];
 }
 
 export default function ViewContent() {
@@ -71,6 +102,10 @@ export default function ViewContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [items, setItems] = useState<Content[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [showFolderDialog, setShowFolderDialog] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
   const [loading, setLoading] = useState(true);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [selectedContent, setSelectedContent] = useState<Content | null>(null);
@@ -94,14 +129,15 @@ export default function ViewContent() {
       if (data.websites) {
         const website =
           data.websites.find(
-            (w: any) => w.name.toLowerCase() === companyName.toLowerCase()
+            (w: Website) => w.name.toLowerCase() === companyName.toLowerCase()
           ) ||
           data.sharedWebsites?.find(
-            (w: any) => w.name.toLowerCase() === companyName.toLowerCase()
+            (w: Website) => w.name.toLowerCase() === companyName.toLowerCase()
           );
 
-        if (website && website.content) {
-          setItems(website.content);
+        if (website) {
+          setItems(website.content || []);
+          setFolders(website.folders || []);
         }
       }
     } catch (error) {
@@ -138,9 +174,52 @@ export default function ViewContent() {
     }
   };
 
-  // Filter content based on search query
-  const filteredContent = items.filter((item) =>
-    item.title.toLowerCase().includes(searchQuery.toLowerCase())
+  const handleGenerateNew = () => {
+    router.push("/content/singlecontent");
+  };
+
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+
+    const companyName = localStorage.getItem("company");
+    if (!companyName) {
+      toast.error("No company selected");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/website", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "createFolder",
+          websiteName: companyName,
+          folderName: newFolderName.trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to create folder");
+      }
+
+      const { website } = await response.json();
+      setFolders(website.folders || []);
+      setNewFolderName("");
+      setShowFolderDialog(false);
+      toast.success("Folder created successfully");
+    } catch (error) {
+      console.error("Error creating folder:", error);
+      toast.error("Failed to create folder");
+    }
+  };
+
+  // Filter content based on search query and selected folder
+  const filteredContent = items.filter(
+    (item) =>
+      item.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
+      (selectedFolder === null || item.folderId === selectedFolder)
   );
 
   // Sort content by date
@@ -180,10 +259,6 @@ export default function ViewContent() {
 
   const handleViewContent = (contentId: string) => {
     router.push(`/dashboard/viewcontent/${contentId}`);
-  };
-
-  const handleGenerateNew = () => {
-    router.push("/content/singlecontent");
   };
 
   const formatContentType = (type: string) => {
@@ -277,6 +352,87 @@ export default function ViewContent() {
     }
   };
 
+  const handleDeleteFolder = async (folderId: string) => {
+    const companyName = localStorage.getItem("company");
+    if (!companyName) {
+      toast.error("No company selected");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/website", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "deleteFolder",
+          websiteName: companyName,
+          folderId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete folder");
+      }
+
+      const { website } = await response.json();
+      setItems(website.content || []);
+      setFolders(website.folders || []);
+
+      // If we're currently viewing the deleted folder, switch to "All Content"
+      if (selectedFolder === folderId) {
+        setSelectedFolder(null);
+      }
+
+      toast.success("Folder deleted successfully");
+    } catch (error) {
+      console.error("Error deleting folder:", error);
+      toast.error("Failed to delete folder");
+    }
+  };
+
+  const handleBulkMoveToFolder = async (folderId: string | null) => {
+    const companyName = localStorage.getItem("company");
+    if (!companyName) {
+      toast.error("No company selected");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/website", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "moveContent",
+          websiteName: companyName,
+          folderId,
+          content: Array.from(selectedItems),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to move content");
+      }
+
+      const { website } = await response.json();
+      setItems(website.content || []);
+      setSelectedItems(new Set());
+      toast.success(
+        `Moved ${selectedItems.size} items to ${
+          folderId
+            ? folders.find((f) => f.id === folderId)?.name
+            : "All Content"
+        }`
+      );
+    } catch (error) {
+      console.error("Error moving content:", error);
+      toast.error("Failed to move content");
+    }
+  };
+
   return (
     <div className="container mx-auto p-6">
       <div className="flex flex-col space-y-6">
@@ -291,21 +447,52 @@ export default function ViewContent() {
           </div>
           <div className="flex gap-2">
             {selectedItems.size > 0 && (
-              <Button
-                variant="outline"
-                onClick={handleBulkWebhookUpload}
-                disabled={isBulkUploading}
-              >
-                {isBulkUploading ? (
-                  <>
-                    <div className="mr-2 h-4 w-4 animate-spin rounded-full border-b-2 border-current"></div>
-                    Uploading...
-                  </>
-                ) : (
-                  <>Send Selected to Webhook ({selectedItems.size})</>
-                )}
-              </Button>
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline">
+                      <Folder className="h-4 w-4 mr-2" />
+                      Move {selectedItems.size} Items
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => handleBulkMoveToFolder(null)}
+                    >
+                      <Folder className="h-4 w-4 mr-2" />
+                      Move to All Content
+                    </DropdownMenuItem>
+                    {folders.map((folder) => (
+                      <DropdownMenuItem
+                        key={folder.id}
+                        onClick={() => handleBulkMoveToFolder(folder.id)}
+                      >
+                        <Folder className="h-4 w-4 mr-2" />
+                        Move to {folder.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button
+                  variant="outline"
+                  onClick={handleBulkWebhookUpload}
+                  disabled={isBulkUploading}
+                >
+                  {isBulkUploading ? (
+                    <>
+                      <div className="mr-2 h-4 w-4 animate-spin rounded-full border-b-2 border-current"></div>
+                      Uploading...
+                    </>
+                  ) : (
+                    <>Send Selected to Webhook ({selectedItems.size})</>
+                  )}
+                </Button>
+              </>
             )}
+            <Button variant="outline" onClick={() => setShowFolderDialog(true)}>
+              <FolderPlus className="h-4 w-4 mr-2" /> New Folder
+            </Button>
             <Button
               className="gap-2"
               onClick={handleGenerateNew}
@@ -318,12 +505,14 @@ export default function ViewContent() {
 
         <Card>
           <CardHeader>
-            <CardTitle>All Content</CardTitle>
-            <CardDescription>
-              A list of all your generated content across different types
-            </CardDescription>
-            <div className="mt-4">
-              <div className="relative">
+            <div className="flex justify-between items-center">
+              <div>
+                <CardTitle>Content Library</CardTitle>
+                <CardDescription>
+                  A list of all your generated content across different types
+                </CardDescription>
+              </div>
+              <div className="relative w-72">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Search content..."
@@ -335,11 +524,43 @@ export default function ViewContent() {
             </div>
           </CardHeader>
           <CardContent>
-            {loading ? (
-              <div className="flex justify-center items-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-              </div>
-            ) : (
+            <Tabs
+              defaultValue={selectedFolder ?? "all"}
+              onValueChange={(value) =>
+                setSelectedFolder(value === "all" ? null : value)
+              }
+            >
+              <TabsList className="mb-4 w-full flex flex-wrap gap-1 p-2">
+                <TabsTrigger
+                  value="all"
+                  className="flex items-center gap-2 data-[state=active]:bg-primary/10 hover:bg-muted"
+                >
+                  <Folder className="h-4 w-4" />
+                  All Content
+                </TabsTrigger>
+                {folders.map((folder) => (
+                  <TabsTrigger
+                    key={folder.id}
+                    value={folder.id}
+                    className="group flex items-center gap-2 data-[state=active]:bg-primary/10 hover:bg-muted"
+                  >
+                    <Folder className="h-4 w-4" />
+                    {folder.name}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-2 h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteFolder(folder.id);
+                      }}
+                    >
+                      <X className="h-4 w-4 text-muted-foreground hover:text-red-600" />
+                    </Button>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+
               <div className="rounded-md border">
                 <Table>
                   <TableHeader>
@@ -358,6 +579,7 @@ export default function ViewContent() {
                       <TableHead>Type</TableHead>
                       <TableHead>Words</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Folder</TableHead>
                       <TableHead
                         onClick={toggleSort}
                         className="cursor-pointer"
@@ -394,7 +616,7 @@ export default function ViewContent() {
                         <TableCell>
                           <Popover>
                             <PopoverTrigger asChild>
-                              <button
+                              <div
                                 className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors hover:cursor-pointer hover:opacity-80 ${
                                   item.status === "Published"
                                     ? "bg-green-100 text-green-800"
@@ -402,7 +624,7 @@ export default function ViewContent() {
                                 }`}
                               >
                                 {item.status}
-                              </button>
+                              </div>
                             </PopoverTrigger>
                             <PopoverContent className="w-[200px] p-3">
                               <div className="space-y-2">
@@ -431,6 +653,21 @@ export default function ViewContent() {
                               </div>
                             </PopoverContent>
                           </Popover>
+                        </TableCell>
+                        <TableCell>
+                          {item.folderId ? (
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Folder className="h-4 w-4" />
+                              {
+                                folders.find((f) => f.id === item.folderId)
+                                  ?.name
+                              }
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">
+                              All Content
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell>
                           {new Date(item.date).toLocaleDateString()}
@@ -470,8 +707,8 @@ export default function ViewContent() {
                                   <Image
                                     src="https://www.google.com/s2/favicons?domain=acme.com&sz=64"
                                     alt="Webhook"
-                                    width={16} // Adjust width as needed
-                                    height={16} // Adjust height as needed
+                                    width={16}
+                                    height={16}
                                     className="mr-2 h-4 w-4"
                                   />
                                   Send to Webhook
@@ -496,29 +733,63 @@ export default function ViewContent() {
                   </TableBody>
                 </Table>
               </div>
-            )}
 
-            {!loading && sortedContent.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-10 text-center">
-                <Search className="h-10 w-10 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground text-lg">
-                  No content found
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Try adjusting your search or generate new content
-                </p>
-              </div>
-            )}
+              {!loading && sortedContent.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <Search className="h-10 w-10 text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground text-lg">
+                    No content found
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Try adjusting your search or generate new content
+                  </p>
+                </div>
+              )}
+            </Tabs>
           </CardContent>
         </Card>
       </div>
+
+      {/* New Folder Dialog */}
+      <Dialog open={showFolderDialog} onOpenChange={setShowFolderDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Folder</DialogTitle>
+            <DialogDescription>
+              Enter a name for your new folder
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="name">Folder Name</Label>
+              <Input
+                id="name"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="Enter folder name..."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowFolderDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button variant="secondary" onClick={handleCreateFolder}>
+              Create Folder
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete "
+              This action cannot be undone. This will permanently delete &quot;
               {selectedContent?.title}&quot; and remove it from our servers.
             </AlertDialogDescription>
           </AlertDialogHeader>

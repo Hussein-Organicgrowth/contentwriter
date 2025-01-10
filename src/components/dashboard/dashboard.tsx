@@ -253,9 +253,11 @@ export default function Dashboard({
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="text-sm text-muted-foreground line-clamp-3 overflow-hidden">
-                  {website.description ||
-                    "View existing content or create new content for your company"}
+                <div className="text-sm text-muted-foreground/80 leading-relaxed bg-muted/30 rounded-lg p-3 min-h-[80px] flex items-center">
+                  <p className="line-clamp-3">
+                    {website.description ||
+                      "View existing content or create new content for your company"}
+                  </p>
                 </div>
               </CardContent>
               <CardFooter className="flex gap-2">
@@ -324,9 +326,11 @@ export default function Dashboard({
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-sm text-muted-foreground line-clamp-3 overflow-hidden">
-                      {website.description ||
-                        "View existing content or create new content for this company"}
+                    <div className="text-sm text-muted-foreground/80 leading-relaxed bg-muted/30 rounded-lg p-3 min-h-[80px] flex items-center">
+                      <p className="line-clamp-3">
+                        {website.description ||
+                          "View existing content or create new content for this company"}
+                      </p>
                     </div>
                   </CardContent>
                   <CardFooter className="flex gap-2">

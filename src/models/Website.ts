@@ -1,61 +1,54 @@
 import mongoose, { Schema, model, models } from "mongoose";
 
-export interface IContent {
-  title: string;
-  html: string;
-  date: Date;
-  status: "Published" | "Draft";
-  contentType:
-    | "Blog Post"
-    | "Article"
-    | "Landing Page"
-    | "Service Page"
-    | "Category Page"
-    | "Product Page";
-  mainKeyword: string;
-  relatedKeywords: string[];
-  sharedUsers: string[];
-}
-
-export interface IWebsite {
-  _id?: string;
-  content: IContent[];
-  toneofvoice: string;
-  targetAudience: string;
-  description: string;
+export interface IWebsite extends mongoose.Document {
   name: string;
-  website: string;
-  summary: string;
+  toneofvoice: string;
+  content: Array<{
+    _id: string;
+    title: string;
+    html: string;
+    date: string;
+    status: "Published" | "Draft";
+    contentType: string;
+    mainKeyword: string;
+    relatedKeywords: string[];
+    folderId?: string | null;
+  }>;
+  folders: Array<{
+    id: string;
+    name: string;
+    createdAt: string;
+  }>;
   userId: string;
-  sharedUsers: string[];
+  sharedWith: string[];
 }
 
-const contentSchema = new Schema<IContent>({
-  title: { type: String, required: true },
-  date: { type: Date, default: Date.now },
-  status: { type: String, default: "Draft" },
-  contentType: { type: String, default: "Blog Post" },
-  mainKeyword: { type: String, default: "" },
-  relatedKeywords: { type: [String], default: [] },
-  html: { type: String, required: true },
+const websiteSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  toneofvoice: { type: String, required: true },
+  content: [
+    {
+      _id: String,
+      title: String,
+      html: String,
+      date: String,
+      status: String,
+      contentType: String,
+      mainKeyword: String,
+      relatedKeywords: [String],
+      folderId: { type: String, default: null },
+    },
+  ],
+  folders: [
+    {
+      id: { type: String, required: true },
+      name: { type: String, required: true },
+      createdAt: { type: String, required: true },
+    },
+  ],
+  userId: { type: String, required: true },
+  sharedWith: [String],
 });
-
-const websiteSchema = new Schema<IWebsite>(
-  {
-    content: { type: [contentSchema], default: [] },
-    toneofvoice: { type: String, default: "" },
-    targetAudience: { type: String, default: "" },
-    description: { type: String, default: "" },
-    name: { type: String, required: true },
-    website: { type: String, required: true },
-    summary: { type: String, required: true },
-    userId: { type: String, required: true },
-    sharedUsers: { type: [String], default: [] },
-  },
-  {
-    timestamps: true,
-  }
-);
 
 export const Website =
   models.Website || model<IWebsite>("Website", websiteSchema);
