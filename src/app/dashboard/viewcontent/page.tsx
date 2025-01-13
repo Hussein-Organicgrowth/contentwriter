@@ -126,19 +126,10 @@ export default function ViewContent() {
         throw new Error("No company selected");
       }
 
-      console.log("Fetching content for company:", companyName);
       const response = await fetch("/api/website");
       const data = await response.json();
 
       console.log("API Response:", data);
-      console.log(
-        "Owned websites:",
-        data.websites?.map((w: Website) => w.name)
-      );
-      console.log(
-        "Shared websites:",
-        data.sharedWebsites?.map((w: Website) => w.name)
-      );
 
       if (!data.websites && !data.sharedWebsites) {
         console.log("No websites found");
@@ -156,19 +147,12 @@ export default function ViewContent() {
 
       if (!website) {
         console.log("Website not found:", companyName);
-        console.log(
-          "Available websites:",
-          [...(data.websites || []), ...(data.sharedWebsites || [])].map(
-            (w: Website) => w.name
-          )
-        );
         toast.error("Website not found");
         return;
       }
 
       console.log("Found website:", website.name);
-      console.log("Website content:", website.content?.length || 0, "items");
-      console.log("Website folders:", website.folders?.length || 0, "folders");
+      console.log("Website content:", website.content);
       setItems(website.content || []);
       setFolders(website.folders || []);
     } catch (error) {
