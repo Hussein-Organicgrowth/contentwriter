@@ -273,6 +273,7 @@ export default function ViewContent() {
   };
 
   const handleViewContent = (contentId: string) => {
+    console.log("contentId", contentId);
     router.push(`/dashboard/viewcontent/${contentId}`);
   };
 

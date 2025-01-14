@@ -81,7 +81,7 @@ const websiteSchema = new mongoose.Schema({
   targetAudience: { type: String, required: true },
   content: [
     {
-      _id: String,
+      _id: { type: String, required: true },
       title: String,
       html: String,
       date: String,
