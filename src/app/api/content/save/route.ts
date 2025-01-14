@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { Website } from "@/models/Website";
-import { getServerSession } from "next-auth";
 import connectToDatabase from "@/lib/mongodb";
 import { currentUser } from "@clerk/nextjs/server";
 import mongoose from "mongoose";
