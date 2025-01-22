@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Table,
 	TableBody,
@@ -33,6 +34,37 @@ interface ShopifyProduct {
 }
 
 type StatusType = "all" | "active" | "archived" | "draft";
+type LanguageType =
+	| "en-US"
+	| "en-GB"
+	| "es"
+	| "fr"
+	| "de"
+	| "it"
+	| "pt"
+	| "nl"
+	| "pl"
+	| "sv"
+	| "da"
+	| "no"
+	| "fi";
+type CountryType =
+	| "US"
+	| "GB"
+	| "CA"
+	| "AU"
+	| "DE"
+	| "FR"
+	| "ES"
+	| "IT"
+	| "NL"
+	| "SE"
+	| "NO"
+	| "DK"
+	| "FI"
+	| "PL"
+	| "BR"
+	| "MX";
 
 export default function ProductsPage() {
 	const [isConnected, setIsConnected] = useState(false);
@@ -47,6 +79,12 @@ export default function ProductsPage() {
 	const [isGenerating, setIsGenerating] = useState<{ [key: string]: boolean }>(
 		{}
 	);
+	const [selectedProducts, setSelectedProducts] = useState<Set<string>>(
+		new Set()
+	);
+	const [isBulkGenerating, setIsBulkGenerating] = useState(false);
+	const [selectedLanguage, setSelectedLanguage] = useState<LanguageType>("da");
+	const [selectedCountry, setSelectedCountry] = useState<CountryType>("DK");
 
 	useEffect(() => {
 		// Get company from localStorage
@@ -70,6 +108,24 @@ export default function ProductsPage() {
 					(product) => product.status.toLowerCase() === selectedStatus
 				)
 			);
+		}
+	};
+
+	const toggleProductSelection = (productId: string) => {
+		const newSelected = new Set(selectedProducts);
+		if (newSelected.has(productId)) {
+			newSelected.delete(productId);
+		} else {
+			newSelected.add(productId);
+		}
+		setSelectedProducts(newSelected);
+	};
+
+	const toggleAllProducts = () => {
+		if (selectedProducts.size === filteredProducts.length) {
+			setSelectedProducts(new Set());
+		} else {
+			setSelectedProducts(new Set(filteredProducts.map((p) => p.id)));
 		}
 	};
 
@@ -140,7 +196,6 @@ export default function ProductsPage() {
 		try {
 			setIsGenerating({ ...isGenerating, [product.id]: true });
 
-			// First, generate the description
 			const generateResponse = await fetch("/api/generate/description", {
 				method: "POST",
 				headers: {
@@ -150,6 +205,8 @@ export default function ProductsPage() {
 					title: product.title,
 					company,
 					existingDescription: product.body_html || "",
+					language: selectedLanguage,
+					targetCountry: selectedCountry,
 				}),
 			});
 
@@ -159,7 +216,6 @@ export default function ProductsPage() {
 
 			const { description } = await generateResponse.json();
 
-			// Then, update the product in Shopify
 			const updateResponse = await fetch("/api/platform/shopify/update", {
 				method: "POST",
 				headers: {
@@ -178,27 +234,126 @@ export default function ProductsPage() {
 
 			const { product: updatedProduct } = await updateResponse.json();
 
-			// Update the local state with the new description
 			const updatedProducts = products.map((p) =>
 				p.id === product.id ? updatedProduct : p
 			);
 			setProducts(updatedProducts);
-			filterProducts(); // Re-apply filters
+			filterProducts();
 
 			toast.success("Product description updated successfully");
+			return true;
 		} catch (error) {
 			console.error("Error updating product description:", error);
 			toast.error("Failed to update product description");
+			return false;
 		} finally {
 			setIsGenerating({ ...isGenerating, [product.id]: false });
 		}
 	};
 
-	// Function to safely render HTML content
+	const handleBulkGenerate = async () => {
+		if (selectedProducts.size === 0) {
+			toast.error("Please select products to generate descriptions");
+			return;
+		}
+
+		setIsBulkGenerating(true);
+		let successCount = 0;
+		let failCount = 0;
+
+		try {
+			const selectedProductsList = filteredProducts.filter((p) =>
+				selectedProducts.has(p.id)
+			);
+
+			for (const product of selectedProductsList) {
+				const success = await generateAndUpdateDescription(product);
+				if (success) {
+					successCount++;
+				} else {
+					failCount++;
+				}
+
+				toast.success(
+					`Progress: ${successCount + failCount}/${selectedProducts.size}`
+				);
+			}
+
+			toast.success(
+				`Completed! Success: ${successCount}, Failed: ${failCount}`
+			);
+		} catch (error) {
+			console.error("Error in bulk generation:", error);
+			toast.error("Failed to complete bulk generation");
+		} finally {
+			setIsBulkGenerating(false);
+			setSelectedProducts(new Set());
+		}
+	};
+
 	const renderHTML = (html: string) => {
 		const sanitizedHTML = DOMPurify.sanitize(html);
 		return <div dangerouslySetInnerHTML={{ __html: sanitizedHTML }} />;
 	};
+
+	const LanguageSelector = () => (
+		<div className="flex items-center gap-2">
+			<Label>Language:</Label>
+			<Select
+				value={selectedLanguage}
+				onValueChange={(value: LanguageType) => setSelectedLanguage(value)}>
+				<SelectTrigger className="w-[180px]">
+					<SelectValue placeholder="Select language" />
+				</SelectTrigger>
+				<SelectContent>
+					<SelectItem value="en-US">English (US)</SelectItem>
+					<SelectItem value="en-GB">English (UK)</SelectItem>
+					<SelectItem value="es">Spanish</SelectItem>
+					<SelectItem value="fr">French</SelectItem>
+					<SelectItem value="de">German</SelectItem>
+					<SelectItem value="it">Italian</SelectItem>
+					<SelectItem value="pt">Portuguese</SelectItem>
+					<SelectItem value="nl">Dutch</SelectItem>
+					<SelectItem value="pl">Polish</SelectItem>
+					<SelectItem value="sv">Swedish</SelectItem>
+					<SelectItem value="da">Danish</SelectItem>
+					<SelectItem value="no">Norwegian</SelectItem>
+					<SelectItem value="fi">Finnish</SelectItem>
+				</SelectContent>
+			</Select>
+		</div>
+	);
+
+	const CountrySelector = () => (
+		<div className="flex items-center gap-2">
+			<Label>Market:</Label>
+			<Select
+				value={selectedCountry}
+				onValueChange={(value: CountryType) => setSelectedCountry(value)}>
+				<SelectTrigger className="w-[180px]">
+					<SelectValue placeholder="Select market" />
+				</SelectTrigger>
+				<SelectContent>
+					<SelectItem value="US">United States</SelectItem>
+					<SelectItem value="GB">United Kingdom</SelectItem>
+					<SelectItem value="CA">Canada</SelectItem>
+					<SelectItem value="AU">Australia</SelectItem>
+					<SelectItem value="DE">Germany</SelectItem>
+					<SelectItem value="FR">France</SelectItem>
+					<SelectItem value="ES">Spain</SelectItem>
+					<SelectItem value="IT">Italy</SelectItem>
+					<SelectItem value="NL">Netherlands</SelectItem>
+					<SelectItem value="SE">Sweden</SelectItem>
+					<SelectItem value="NO">Norway</SelectItem>
+					<SelectItem value="DK">Denmark</SelectItem>
+					<SelectItem value="FI">Finland</SelectItem>
+					<SelectItem value="PL">Poland</SelectItem>
+					<SelectItem value="BR">Brazil</SelectItem>
+					<SelectItem value="MX">Mexico</SelectItem>
+				</SelectContent>
+			</Select>
+		</div>
+	);
 
 	if (!company) {
 		return (
@@ -278,9 +433,20 @@ export default function ProductsPage() {
 									</SelectContent>
 								</Select>
 							</div>
+							<LanguageSelector />
+							<CountrySelector />
 						</div>
-						<div className="text-sm text-gray-500">
-							Showing {filteredProducts.length} of {products.length} products
+						<div className="flex items-center gap-4">
+							<div className="text-sm text-gray-500">
+								Selected: {selectedProducts.size} of {filteredProducts.length}{" "}
+								products
+							</div>
+							<Button
+								variant="secondary"
+								onClick={handleBulkGenerate}
+								disabled={selectedProducts.size === 0 || isBulkGenerating}>
+								{isBulkGenerating ? "Generating..." : "Generate Selected"}
+							</Button>
 						</div>
 					</div>
 
@@ -288,6 +454,14 @@ export default function ProductsPage() {
 						<Table>
 							<TableHeader>
 								<TableRow>
+									<TableHead className="w-[50px]">
+										<Checkbox
+											checked={
+												selectedProducts.size === filteredProducts.length
+											}
+											onCheckedChange={toggleAllProducts}
+										/>
+									</TableHead>
 									<TableHead className="w-[100px]">Image</TableHead>
 									<TableHead>Product Name</TableHead>
 									<TableHead className="max-w-[400px]">
@@ -300,6 +474,14 @@ export default function ProductsPage() {
 							<TableBody>
 								{filteredProducts.map((product) => (
 									<TableRow key={product.id}>
+										<TableCell>
+											<Checkbox
+												checked={selectedProducts.has(product.id)}
+												onCheckedChange={() =>
+													toggleProductSelection(product.id)
+												}
+											/>
+										</TableCell>
 										<TableCell>
 											{product.images[0] && (
 												<img
