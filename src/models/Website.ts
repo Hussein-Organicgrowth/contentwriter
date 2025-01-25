@@ -62,6 +62,12 @@ export interface IWebsite extends mongoose.Document {
       }
     >;
   }>;
+  pendingProductDescriptions: Array<{
+    productId: string;
+    oldDescription: string;
+    newDescription: string;
+    generatedAt: string;
+  }>;
   folders: Array<{
     id: string;
     name: string;
@@ -100,6 +106,14 @@ const websiteSchema = new mongoose.Schema({
         },
         default: {},
       },
+    },
+  ],
+  pendingProductDescriptions: [
+    {
+      productId: { type: String, required: true },
+      oldDescription: { type: String, default: "" },
+      newDescription: { type: String, required: true },
+      generatedAt: { type: String, required: true },
     },
   ],
   folders: [

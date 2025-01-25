@@ -47,6 +47,7 @@ Keep it brief but informative - aim for 2-5 short paragraphs maximum.
 DO NOT include any headings or titles in your response - these will be handled separately.`;
 
   const companyContext = `
+You work for the company ${companyInfo.name}. and you are writing content for their website.
 Quick brief about ${companyInfo.name}:
 - They help: ${companyInfo.targetAudience}
 - Their style: ${companyInfo.toneofvoice}
