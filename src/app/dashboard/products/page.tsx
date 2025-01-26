@@ -671,6 +671,12 @@ export default function ProductsPage() {
 
         const { description: newDescription } = await generateResponse.json();
 
+        // Remove any ```html tags from the description
+        const cleanDescription = newDescription.replace(
+          /```html\n?|\n?```/g,
+          ""
+        );
+
         // Save pending description
         const savePendingResponse = await fetch(
           "/api/platform/shopify/pending",
@@ -685,7 +691,7 @@ export default function ProductsPage() {
                 localPendingDescription?.oldDescription ||
                 selectedProduct.body_html ||
                 "",
-              newDescription,
+              newDescription: cleanDescription,
               company,
             }),
           }
@@ -702,12 +708,12 @@ export default function ProductsPage() {
             localPendingDescription?.oldDescription ||
             selectedProduct.body_html ||
             "",
-          newDescription,
+          newDescription: cleanDescription,
           generatedAt: new Date().toISOString(),
         };
 
         setLocalPendingDescription(newPendingDesc);
-        setEditedDescription(newDescription);
+        setEditedDescription(cleanDescription);
 
         // Update parent state
         setPendingDescriptions((prev) => ({
