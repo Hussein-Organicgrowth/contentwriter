@@ -1,4 +1,4 @@
-import mongoose, { Schema, model, models } from "mongoose";
+import mongoose, { model, models } from "mongoose";
 
 export interface PlatformConfig {
   platform: "wordpress" | "shopify";
@@ -29,7 +29,7 @@ export interface PlatformConfig {
     };
     customFields?: Array<{
       key: string;
-      value: any;
+      value: string | number | boolean;
       type: "text" | "number" | "boolean";
     }>;
   };
@@ -64,6 +64,12 @@ export interface IWebsite extends mongoose.Document {
   }>;
   pendingProductDescriptions: Array<{
     productId: string;
+    oldDescription: string;
+    newDescription: string;
+    generatedAt: string;
+  }>;
+  pendingCollectionDescriptions: Array<{
+    collectionId: string;
     oldDescription: string;
     newDescription: string;
     generatedAt: string;
@@ -111,6 +117,14 @@ const websiteSchema = new mongoose.Schema({
   pendingProductDescriptions: [
     {
       productId: { type: String, required: true },
+      oldDescription: { type: String, default: "" },
+      newDescription: { type: String, required: true },
+      generatedAt: { type: String, required: true },
+    },
+  ],
+  pendingCollectionDescriptions: [
+    {
+      collectionId: { type: String, required: true },
       oldDescription: { type: String, default: "" },
       newDescription: { type: String, required: true },
       generatedAt: { type: String, required: true },

@@ -149,17 +149,6 @@ export function Sidebar() {
                       <DocumentDuplicateIcon className="w-5 h-5" />
                       <span>Generer Masse Indhold</span>
                     </Link>
-                    <Link
-                      href="/content/rewrite"
-                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors ${
-                        pathname === "/content/rewrite"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-gray-700 hover:bg-gray-50"
-                      }`}
-                    >
-                      <ArrowPathIcon className="w-5 h-5" />
-                      <span>Omskriv Indhold</span>
-                    </Link>
                   </div>
                 </div>
 
