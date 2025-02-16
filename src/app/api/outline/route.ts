@@ -248,10 +248,10 @@ export async function POST(req: Request) {
 		console.log("ANALYSIS:", competitorAnalysis);
 
 		const completion = await openai.chat.completions.create({
-			model: "chatgpt-4o-latest",
+			model: "o3-mini-2025-01-31",
 			messages: [
 				{
-					role: "system",
+					role: "developer",
 					content: `You are an expert SEO content strategist who creates highly optimized, user-focused content outlines.
 					${languageInstructions[language] || languageInstructions["en-US"]}
 					${countryContext[targetCountry]}
@@ -336,7 +336,7 @@ export async function POST(req: Request) {
 					`,
 				},
 			],
-			temperature: 0.4,
+			//temperature: 0.4,
 		});
 
 		const outline =
