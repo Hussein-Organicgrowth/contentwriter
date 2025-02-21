@@ -56,7 +56,7 @@ export default function SingleContent() {
   const [newKeyword, setNewKeyword] = useState("");
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
-  const [language, setLanguage] = useState("da-DK");
+  const [language, setLanguage] = useState("da");
   const [targetCountry, setTargetCountry] = useState("DK");
   const [contentType, setContentType] = useState("article");
   const [website, setWebsite] = useState<Website[]>([]);
