@@ -58,7 +58,49 @@ export async function POST(req: Request) {
 			nl: "Write in Dutch using formal language.",
 			pl: "Write in Polish using formal language.",
 			sv: "Write in Swedish using formal language.",
-			da: "Write in Danish using formal language.",
+			da: `Write in Danish using formal language. 
+			When writing in Danish, ensure the following rules are adhered to:
+	   
+	   Verb Conjugation in Present Tense:
+	   
+	   Add "-r" to the infinitive form of verbs to form the present tense.
+	   Example: "at lære" becomes "jeg lærer."
+	   Distinguishing "nogle" and "nogen":
+	   
+	   Use "nogle" when referring to multiple people or things. Example: "Nogle mennesker har nemt ved grammatik."
+	   Use "nogen" in questions, negatives, or conditionals. Example: "Er der nogen, der kan forklare mig reglerne?"
+	   Compound Words:
+	   
+	   Combine words if the emphasis is on the first part (e.g., "Dansklærer" for a Danish teacher).
+	   Keep them separate if the emphasis is on the second part (e.g., "dansk lærer" for a teacher from Denmark).
+	   Endings "-ende" vs. "-ene":
+	   
+	   Use "-ende" for present participles (verbs), e.g., "løbende."
+	   Use "-ene" for definite plural nouns, e.g., "løbene."
+	   Pronoun Usage:
+	   
+	   Use "jeg" as the subject. Example: "Laura og jeg spiser aftensmad."
+	   Use "mig" as the object. Example: "Mads bad Laura og mig om at spise aftensmad."
+	   Noun Genders and Articles:
+	   
+	   Common gender nouns use "en," and neuter nouns use "et."
+	   Examples: "en bil" (a car) and "et hus" (a house).
+	   Definite Nouns:
+	   
+	   Add "-en" for common gender nouns and "-et" for neuter nouns to make them definite.
+	   Examples: "bilen" (the car) and "huset" (the house).
+	   Adjective Agreement:
+	   
+	   Match adjectives to the gender and number of the noun they describe.
+	   Examples: "en stor dreng" (a big boy) vs. "et stort hus" (a big house).
+	   Word Order:
+	   
+	   Follow Subject-Verb-Object order, but ensure the verb is in the second position in main clauses (V2 word order).
+	   Capitalization:
+	   
+	   Capitalize only proper nouns and the first word of a sentence.
+	   Example: Days, months, and nationalities are lowercase: "mandag," "juli," "dansk."
+			 `,
 			no: "Write in Norwegian using formal language.",
 			fi: "Write in Finnish using formal language.",
 		};
@@ -97,10 +139,10 @@ export async function POST(req: Request) {
 			"Target audience is in the United States.";
 
 		const completion = await openai.chat.completions.create({
-			model: "gpt-4o-mini",
+			model: "o3-mini-2025-01-31",
 			messages: [
 				{
-					role: "system",
+					role: "developer",
 					content: `You are a professional content writer specializing in creating engaging, SEO-optimized titles tailored to the specified language and target country. Ensure the titles are culturally relevant and adhere to the linguistic nuances of the target audience.
           
           Make sure to follow the language instructions:
@@ -137,7 +179,7 @@ export async function POST(req: Request) {
 		  ${businessNameValue ? `- Business name: ${businessNameValue}` : ""}`,
 				},
 			],
-			temperature: 0.7,
+			//	temperature: 0.7,
 		});
 
 		const title = completion.choices[0]?.message?.content?.trim() || "";
