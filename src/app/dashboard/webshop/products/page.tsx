@@ -123,6 +123,7 @@ export default function ProductsPage() {
   const [isCompareOpen, setIsCompareOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showPendingOnly, setShowPendingOnly] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     // Get company from localStorage
@@ -242,6 +243,7 @@ export default function ProductsPage() {
 
   const fetchProducts = async (companyName: string) => {
     try {
+      setIsLoading(true);
       // Fetch products and pending descriptions in parallel
       const [productsResponse, pendingResponse] = await Promise.all([
         fetch(`/api/platform/shopify/products?company=${companyName}`),
@@ -316,6 +318,8 @@ export default function ProductsPage() {
     } catch (error) {
       console.error("Error fetching products:", error);
       toast.error("Failed to fetch products");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -1142,6 +1146,33 @@ export default function ProductsPage() {
     </div>
   );
 
+  const TableSkeleton = () => (
+    <>
+      {[...Array(5)].map((_, index) => (
+        <TableRow key={index} className="animate-pulse">
+          <TableCell>
+            <div className="h-4 w-4 bg-muted rounded" />
+          </TableCell>
+          <TableCell>
+            <div className="h-[80px] w-[80px] bg-muted rounded-md" />
+          </TableCell>
+          <TableCell>
+            <div className="h-6 w-48 bg-muted rounded" />
+          </TableCell>
+          <TableCell>
+            <div className="h-20 bg-muted rounded" />
+          </TableCell>
+          <TableCell>
+            <div className="h-6 w-20 bg-muted rounded-full" />
+          </TableCell>
+          <TableCell className="text-right">
+            <div className="h-9 w-32 bg-muted rounded ml-auto" />
+          </TableCell>
+        </TableRow>
+      ))}
+    </>
+  );
+
   if (!company) {
     return (
       <div className="container mx-auto py-10">
@@ -1268,6 +1299,7 @@ export default function ProductsPage() {
                         selectedProducts.size === filteredProducts.length
                       }
                       onCheckedChange={toggleAllProducts}
+                      disabled={isLoading}
                     />
                   </TableHead>
                   <TableHead className="w-[100px]">Image</TableHead>
@@ -1280,85 +1312,106 @@ export default function ProductsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredProducts.map((product) => (
-                  <TableRow key={product.id}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selectedProducts.has(product.id)}
-                        onCheckedChange={() =>
-                          toggleProductSelection(product.id)
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {product.images[0] && (
-                        <img
-                          src={product.images[0].src}
-                          alt={product.title}
-                          className="w-[80px] h-[80px] object-cover rounded-md"
-                        />
+                {isLoading ? (
+                  <TableSkeleton />
+                ) : (
+                  filteredProducts.map((product) => (
+                    <TableRow
+                      key={product.id}
+                      className={cn(
+                        pendingDescriptions[product.id] && "bg-muted/30"
                       )}
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {product.title}
-                    </TableCell>
-                    <TableCell className="max-w-[400px]">
-                      <div className="max-h-[200px] overflow-y-auto prose prose-sm">
-                        {pendingDescriptions[product.id] ? (
-                          renderHTML(
-                            pendingDescriptions[product.id].oldDescription
-                          )
-                        ) : product.body_html ? (
-                          renderHTML(product.body_html)
-                        ) : (
-                          <span className="text-gray-500 italic">
-                            No description available
-                          </span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          product.status === "active"
-                            ? "bg-green-100 text-green-800"
-                            : product.status === "draft"
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-gray-100 text-gray-800"
-                        }`}
-                      >
-                        {product.status}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {pendingDescriptions[product.id] ? (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedProduct(product);
-                            setIsCompareOpen(true);
-                          }}
-                        >
-                          View Changes
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() =>
-                            generateAndSavePendingDescription(product)
+                    >
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedProducts.has(product.id)}
+                          onCheckedChange={() =>
+                            toggleProductSelection(product.id)
                           }
-                          disabled={isGenerating[product.id]}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {product.images[0] && (
+                          <img
+                            src={product.images[0].src}
+                            alt={product.title}
+                            className="w-[80px] h-[80px] object-cover rounded-md"
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        <div className="flex flex-col gap-2">
+                          <span>{product.title}</span>
+                          {pendingDescriptions[product.id] && (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-fit">
+                              Pending Changes
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[400px]">
+                        <div className="max-h-[200px] overflow-y-auto prose prose-sm">
+                          {pendingDescriptions[product.id] ? (
+                            <div className="relative">
+                              <div className="absolute right-0 top-0 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
+                                Original
+                              </div>
+                              {renderHTML(
+                                pendingDescriptions[product.id].oldDescription
+                              )}
+                            </div>
+                          ) : product.body_html ? (
+                            renderHTML(product.body_html)
+                          ) : (
+                            <span className="text-gray-500 italic">
+                              No description available
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            product.status === "active"
+                              ? "bg-green-100 text-green-800"
+                              : product.status === "draft"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-gray-100 text-gray-800"
+                          }`}
                         >
-                          {isGenerating[product.id]
-                            ? "Generating..."
-                            : "Generate Description"}
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          {product.status}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {pendingDescriptions[product.id] ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedProduct(product);
+                              setIsCompareOpen(true);
+                            }}
+                          >
+                            View Changes
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              generateAndSavePendingDescription(product)
+                            }
+                            disabled={isGenerating[product.id]}
+                          >
+                            {isGenerating[product.id]
+                              ? "Generating..."
+                              : "Generate Description"}
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </div>
