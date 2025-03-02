@@ -247,12 +247,8 @@ export async function POST(req: Request) {
 
 		console.log("ANALYSIS:", competitorAnalysis);
 
-		const completion = await openai.chat.completions.create({
-			model: "o3-mini-2025-01-31",
-			messages: [
-				{
-					role: "developer",
-					content: `You are an expert SEO content strategist who creates highly optimized, user-focused content outlines.
+		// Create a specialized prompt for collection pages
+		let systemPrompt = `You are an expert SEO content strategist who creates highly optimized, user-focused content outlines.
 					${languageInstructions[language] || languageInstructions["en-US"]}
 					${countryContext[targetCountry]}
 
@@ -294,35 +290,72 @@ export async function POST(req: Request) {
 					- Add comparison sections when relevant
 					- Include data/statistics sections for backlink potential
 					- Maintain proper keyword density in headers
-					- Follow E-E-A-T principles in structure
+					- Follow E-E-A-T principles in structure`;
 
-					Required Sections:
-					- Introduction (with featured snippet target)
-					- Main topic sections (with keyword variations)
-					- Practical examples or case studies
-					- Expert insights or analysis
-					- FAQ section (targeting "People Also Ask")
-					- Conclusion with key takeaways
+		// If this is a collection page, use a specialized prompt
+		if (contentType === "collection") {
+			systemPrompt = `
+			You are an expert e-commerce SEO content strategist specializing in collection page optimization.
+					${languageInstructions[language] || languageInstructions["en-US"]}
+					${countryContext[targetCountry]}
 
-					Output Example (Strictly Follow This Format):
-					H2: [Primary Keyword]: Complete Guide for [Current Year]
-					H3: Understanding [Primary Keyword]: Key Concepts
-					H3: Why [Primary Keyword] Matters in [Industry/Context]
-					H2: [Secondary Keyword]: Essential Components
-					H3: Top [Number] [Related Keyword] Strategies
-					H3: Common [Primary Keyword] Challenges and Solutions
-					H2: Expert Tips for [Primary Keyword] Optimization
-					H3: Best Practices from Industry Leaders
-					H2: Frequently Asked Questions About [Primary Keyword]
-					H3: [Common Question 1]
-					H3: [Common Question 2]
-					H2: [Primary Keyword] Success Stories and Examples`,
-				},
-				{
-					role: "user",
-					content: `Primary Keyword: ${keyword}
+					I will provide you with:
+					- A collection name/primary keyword
+					- Competitor analysis from top-ranking collection pages
+
+					Your task is to create an SEO-optimized outline for an e-commerce collection page that:
+					- Follows a proven collection page structure that converts browsers to buyers
+					- Implements strategic keyword placement in headers
+					- Addresses commercial search intent comprehensively
+					- Creates a content hierarchy that both users and search engines can easily understand
+					- Includes semantic SEO elements and related product terms
+					- Maintains optimal content depth for collection pages (not too long, not too short)
+
+					Collection Page SEO Optimization Guidelines:
+					- H2 headers should include primary or secondary keywords when natural
+					- H3 headers should target specific product benefits, features or use cases
+					- Include sections that highlight unique selling points
+					- Structure content to address common customer questions
+					- Add sections for product highlights and key features
+					- Include comparison sections when relevant (e.g., product types, materials, etc.)
+					- Plan for product showcase elements
+
+					Formatting Requirements:
+					- Use H2 for main sections (primary keyword focus)
+					- Use H3 for subsections (benefits, features, use cases)
+					- Follow this format exactly:
+					  H2: Main Section (with keyword)
+					  H3: Subsection (with benefit or feature)
+
+					Collection Page Structure Rules:
+					- Each line must start with the header level (H2:, H3:)
+					- H3 sections must follow an H2 section
+					- Include an introduction section that clearly explains what the collection offers
+					- Add sections highlighting key benefits and features
+					- Include sections addressing common customer questions
+					- Maintain proper keyword density in headers
+					- Follow a logical flow that guides customers toward purchase
+
+					IMPORTANT RESTRICTIONS:
+					- DO NOT create sections that would require expert insights or opinions
+					- DO NOT include sections about "expert recommendations" or "professional advice"
+					- DO NOT create sections that would require scientific or technical expertise
+					- DO NOT include sections about "research findings" or "studies show"
+					- Focus ONLY on product features, benefits, and factual information
+					- Avoid creating sections that would require the AI to invent facts or statistics
+
+					Required Sections for Collection Pages:
+					- Introduction (with primary keyword and collection overview)
+					- Key benefits or unique selling points
+					- Product features or highlights
+					- Use cases or applications
+					- Quality or materials section (if applicable)
+					- Why choose this collection (focus on product features, not expert claims)
+					- Call to action section`;
+		}
+
+		let userPrompt = `Primary Keyword: ${keyword}
 					Title: ${title}
-					is very important to use the content type to determine the appropriate header structure
 					Content Type: ${contentType}
 					
 					Competitor Analysis:
@@ -332,8 +365,48 @@ export async function POST(req: Request) {
 					Focus on featured snippet opportunities and "People Also Ask" potential.
 					KEEP THE OUTLINE TO MAX 5-6 MAIN SECTIONS (H2) WITH RELEVANT SUBSECTIONS.
 					ONLY OUTPUT THE OUTLINE, NO OTHER TEXT
-					DO NOT INCLUDE FAQ AND A CONCLUSION.
-					`,
+					DO NOT INCLUDE FAQ AND A CONCLUSION.`;
+
+		// If this is a collection page, use a specialized user prompt
+		if (contentType === "collection") {
+			userPrompt = `
+			Collection Name/Primary Keyword: ${keyword}
+					Title: ${title}
+					Content Type: ${contentType}
+					
+					Competitor Analysis:
+					${competitorAnalysis}
+					
+					Create a comprehensive, SEO-optimized outline for this collection page that will:
+					1. Engage shoppers immediately with compelling benefits
+					2. Highlight key product features and unique selling points
+					3. Address common customer questions and objections
+					4. Guide customers toward making a purchase decision
+					5. Outperform competitor collection pages in both conversion and SEO
+					
+					IMPORTANT RESTRICTIONS:
+					- DO NOT create sections that would require expert insights or opinions
+					- DO NOT include sections about "expert recommendations" or "professional advice"
+					- DO NOT create sections that would require scientific or technical expertise
+					- DO NOT include sections about "research findings" or "studies show"
+					- Focus ONLY on product features, benefits, and factual information
+					- Avoid creating sections that would require the AI to invent facts or statistics
+					
+					KEEP THE OUTLINE TO 5-6 MAIN SECTIONS (H2) WITH 2-3 RELEVANT SUBSECTIONS (H3) EACH.
+					ENSURE THE STRUCTURE FOLLOWS A LOGICAL FLOW FROM INTRODUCTION TO CALL-TO-ACTION.
+					ONLY OUTPUT THE OUTLINE, NO OTHER TEXT.`;
+		}
+
+		const completion = await openai.chat.completions.create({
+			model: "o3-mini-2025-01-31",
+			messages: [
+				{
+					role: "developer",
+					content: systemPrompt,
+				},
+				{
+					role: "user",
+					content: userPrompt,
 				},
 			],
 			//temperature: 0.4,
