@@ -115,7 +115,7 @@ export default function ContentSelector() {
 								asChild
 								className="w-full md:w-auto transition-all hover:bg-slate-600 hover:text-white shadow-sm hover:shadow-md"
 								variant="secondary">
-								<Link href="/content/view">View Content</Link>
+								<Link href="/dashboard/viewcontent">View Content</Link>
 							</Button>
 						</CardFooter>
 					</Card>
@@ -132,7 +132,7 @@ export default function ContentSelector() {
 								</div>
 							</div>
 							<CardTitle className="text-2xl group-hover:text-primary transition-colors">
-								Products
+								Webshop
 							</CardTitle>
 						</CardHeader>
 						<CardContent className="text-center relative z-10">
@@ -146,7 +146,7 @@ export default function ContentSelector() {
 								asChild
 								className="w-full md:w-auto transition-all hover:bg-slate-600 hover:text-white shadow-sm hover:shadow-md"
 								variant="secondary">
-								<Link href="/dashboard/webshop/products">Manage Products</Link>
+								<Link href="/dashboard/webshop">Manage Webshop</Link>
 							</Button>
 						</CardFooter>
 					</Card>
