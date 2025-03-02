@@ -14,7 +14,7 @@ import Image from "next/image";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-	title: "Content generator for organicgrowth ",
+	title: "Copybuddy app",
 	description: "Helps our customers generate content for their websites",
 };
 
