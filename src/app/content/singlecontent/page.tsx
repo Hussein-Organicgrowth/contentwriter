@@ -59,6 +59,7 @@ export default function SingleContent() {
   const [language, setLanguage] = useState("da");
   const [targetCountry, setTargetCountry] = useState("DK");
   const [contentType, setContentType] = useState("article");
+  const [context, setContext] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [selectedWebsite, setSelectedWebsite] = useState<Website | null>(null);
   const [includeBusinessName, setIncludeBusinessName] = useState(false);
@@ -201,6 +202,7 @@ export default function SingleContent() {
       contentType,
       relatedKeywords,
       selectedWebsite,
+      context,
     };
 
     // Store the form data in localStorage for the outline page
@@ -501,6 +503,28 @@ export default function SingleContent() {
                       Add
                     </Button>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Add Context Section */}
+            <Card className="border bg-gray-50">
+              <CardContent className="space-y-4 pt-6">
+                <div className="space-y-2">
+                  <Label className="text-gray-700 font-bold">
+                    Additional Context (Optional)
+                  </Label>
+                  <p className="text-sm text-gray-500">
+                    Add any specific context or information you want the AI to
+                    consider when generating the content.
+                  </p>
+                  <textarea
+                    value={context}
+                    onChange={(e) => setContext(e.target.value)}
+                    placeholder="Enter additional context or specific information you want to include in the content..."
+                    className="w-full min-h-[100px] p-3 rounded-md border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!canGenerate}
+                  />
                 </div>
               </CardContent>
             </Card>

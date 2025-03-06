@@ -3,168 +3,168 @@ import { NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 
 const openai = new OpenAI({
-	apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 type LanguageCode =
-	| "en-US"
-	| "en-GB"
-	| "es"
-	| "fr"
-	| "de"
-	| "it"
-	| "pt"
-	| "nl"
-	| "pl"
-	| "sv"
-	| "da"
-	| "no"
-	| "fi";
+  | "en-US"
+  | "en-GB"
+  | "es"
+  | "fr"
+  | "de"
+  | "it"
+  | "pt"
+  | "nl"
+  | "pl"
+  | "sv"
+  | "da"
+  | "no"
+  | "fi";
 type CountryCode =
-	| "US"
-	| "GB"
-	| "CA"
-	| "AU"
-	| "DE"
-	| "FR"
-	| "ES"
-	| "IT"
-	| "NL"
-	| "SE"
-	| "NO"
-	| "DK"
-	| "FI"
-	| "PL"
-	| "BR"
-	| "MX";
+  | "US"
+  | "GB"
+  | "CA"
+  | "AU"
+  | "DE"
+  | "FR"
+  | "ES"
+  | "IT"
+  | "NL"
+  | "SE"
+  | "NO"
+  | "DK"
+  | "FI"
+  | "PL"
+  | "BR"
+  | "MX";
 
 interface Competitor {
-	title: string;
-	url: string;
-	headings: string[];
-	content?: string;
+  title: string;
+  url: string;
+  headings: string[];
+  content?: string;
 }
 
 async function fetchAndParseUrl(
-	url: string
+  url: string
 ): Promise<{ headings: string[]; content: string } | null> {
-	try {
-		const response = await fetch(url);
-		const html = await response.text();
-		const $ = cheerio.load(html);
+  try {
+    const response = await fetch(url);
+    const html = await response.text();
+    const $ = cheerio.load(html);
 
-		// Remove script tags, style tags, and comments
-		$("script").remove();
-		$("style").remove();
-		$("comments").remove();
+    // Remove script tags, style tags, and comments
+    $("script").remove();
+    $("style").remove();
+    $("comments").remove();
 
-		// Get all headings
-		const headings = $("h1, h2, h3")
-			.map((_, el) => $(el).text().trim())
-			.get()
-			.filter((heading) => heading.length > 0);
+    // Get all headings
+    const headings = $("h1, h2, h3")
+      .map((_, el) => $(el).text().trim())
+      .get()
+      .filter((heading) => heading.length > 0);
 
-		// Get main content (focusing on article or main content areas)
-		const contentSelectors = [
-			"article",
-			"main",
-			".content",
-			".post-content",
-			".entry-content",
-		];
-		let content = "";
+    // Get main content (focusing on article or main content areas)
+    const contentSelectors = [
+      "article",
+      "main",
+      ".content",
+      ".post-content",
+      ".entry-content",
+    ];
+    let content = "";
 
-		for (const selector of contentSelectors) {
-			const element = $(selector);
-			if (element.length > 0) {
-				content = element.text().trim();
-				break;
-			}
-		}
+    for (const selector of contentSelectors) {
+      const element = $(selector);
+      if (element.length > 0) {
+        content = element.text().trim();
+        break;
+      }
+    }
 
-		// If no content found through selectors, get body content
-		if (!content) {
-			content = $("body").text().trim();
-		}
+    // If no content found through selectors, get body content
+    if (!content) {
+      content = $("body").text().trim();
+    }
 
-		return { headings, content };
-	} catch (error) {
-		console.error(`Error fetching ${url}:`, error);
-		return null;
-	}
+    return { headings, content };
+  } catch (error) {
+    console.error(`Error fetching ${url}:`, error);
+    return null;
+  }
 }
 
 async function getCompetitorContent(
-	keyword: string,
-	targetCountry: CountryCode
+  keyword: string,
+  targetCountry: CountryCode
 ): Promise<Competitor[]> {
-	try {
-		const response = await fetch("https://google.serper.dev/search", {
-			method: "POST",
-			headers: {
-				"X-API-KEY": SERPER_API_KEY!,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				q: keyword,
-				gl: targetCountry.toLowerCase(),
-				num: 4,
-			}),
-		});
+  try {
+    const response = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: {
+        "X-API-KEY": SERPER_API_KEY!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        q: keyword,
+        gl: targetCountry.toLowerCase(),
+        num: 4,
+      }),
+    });
 
-		const data = await response.json();
-		const competitors = data.organic || [];
+    const data = await response.json();
+    const competitors = data.organic || [];
 
-		// Fetch and parse each competitor's content
-		const competitorData: Competitor[] = await Promise.all(
-			competitors.slice(0, 4).map(async (comp: any) => {
-				const result = await fetchAndParseUrl(comp.link);
-				return {
-					title: comp.title,
-					url: comp.link,
-					headings: result?.headings || [],
-					content: result?.content || "",
-				};
-			})
-		);
+    // Fetch and parse each competitor's content
+    const competitorData: Competitor[] = await Promise.all(
+      competitors.slice(0, 4).map(async (comp: any) => {
+        const result = await fetchAndParseUrl(comp.link);
+        return {
+          title: comp.title,
+          url: comp.link,
+          headings: result?.headings || [],
+          content: result?.content || "",
+        };
+      })
+    );
 
-		return competitorData.filter((comp) => comp.headings.length > 0);
-	} catch (error) {
-		console.error("Error fetching competitor content:", error);
-		return [];
-	}
+    return competitorData.filter((comp) => comp.headings.length > 0);
+  } catch (error) {
+    console.error("Error fetching competitor content:", error);
+    return [];
+  }
 }
 
 export async function POST(req: Request) {
-	try {
-		const {
-			keyword,
-			title,
-			language = "en-US",
-			targetCountry,
-			contentType,
-		}: {
-			keyword: string;
-			title: string;
-			language?: LanguageCode;
-			targetCountry: CountryCode;
-			contentType: string;
-		} = await req.json();
+  try {
+    const {
+      keyword,
+      title,
+      language = "en-US",
+      targetCountry,
+      contentType,
+    }: {
+      keyword: string;
+      title: string;
+      language?: LanguageCode;
+      targetCountry: CountryCode;
+      contentType: string;
+    } = await req.json();
 
-		const languageInstructions: Record<LanguageCode, string> = {
-			"en-US": "Use American English spelling and terminology.",
-			"en-GB": "Use British English spelling and terminology.",
-			es: "Write in Spanish using formal language.",
-			fr: "Write in French using formal language.",
-			de: "Write in German using formal language.",
-			it: "Write in Italian using formal language.",
-			pt: "Write in Portuguese using formal language.",
-			nl: "Write in Dutch using formal language.",
-			pl: "Write in Polish using formal language.",
-			sv: "Write in Swedish using formal language.",
-			da: `Write in Danish using formal language. 
+    const languageInstructions: Record<LanguageCode, string> = {
+      "en-US": "Use American English spelling and terminology.",
+      "en-GB": "Use British English spelling and terminology.",
+      es: "Write in Spanish using formal language.",
+      fr: "Write in French using formal language.",
+      de: "Write in German using formal language.",
+      it: "Write in Italian using formal language.",
+      pt: "Write in Portuguese using formal language.",
+      nl: "Write in Dutch using formal language.",
+      pl: "Write in Polish using formal language.",
+      sv: "Write in Swedish using formal language.",
+      da: `Write in Danish using formal language. 
 			When writing in Danish, ensure the following rules are adhered to:
 	   
 	   Verb Conjugation in Present Tense:
@@ -207,48 +207,48 @@ export async function POST(req: Request) {
 	   Capitalize only proper nouns and the first word of a sentence.
 	   Example: Days, months, and nationalities are lowercase: "mandag," "juli," "dansk."
 			 `,
-			no: "Write in Norwegian using formal language.",
-			fi: "Write in Finnish using formal language.",
-		};
+      no: "Write in Norwegian using formal language.",
+      fi: "Write in Finnish using formal language.",
+    };
 
-		const countryContext: Record<CountryCode, string> = {
-			US: "Target audience is in the United States.",
-			GB: "Target audience is in the United Kingdom.",
-			CA: "Target audience is in Canada.",
-			AU: "Target audience is in Australia.",
-			DE: "Target audience is in Germany.",
-			FR: "Target audience is in France.",
-			ES: "Target audience is in Spain.",
-			IT: "Target audience is in Italy.",
-			NL: "Target audience is in the Netherlands.",
-			SE: "Target audience is in Sweden.",
-			NO: "Target audience is in Norway.",
-			DK: "Target audience is in Denmark.",
-			FI: "Target audience is in Finland.",
-			PL: "Target audience is in Poland.",
-			BR: "Target audience is in Brazil.",
-			MX: "Target audience is in Mexico.",
-		};
+    const countryContext: Record<CountryCode, string> = {
+      US: "Target audience is in the United States.",
+      GB: "Target audience is in the United Kingdom.",
+      CA: "Target audience is in Canada.",
+      AU: "Target audience is in Australia.",
+      DE: "Target audience is in Germany.",
+      FR: "Target audience is in France.",
+      ES: "Target audience is in Spain.",
+      IT: "Target audience is in Italy.",
+      NL: "Target audience is in the Netherlands.",
+      SE: "Target audience is in Sweden.",
+      NO: "Target audience is in Norway.",
+      DK: "Target audience is in Denmark.",
+      FI: "Target audience is in Finland.",
+      PL: "Target audience is in Poland.",
+      BR: "Target audience is in Brazil.",
+      MX: "Target audience is in Mexico.",
+    };
 
-		// Get competitor content
-		const competitors = await getCompetitorContent(keyword, targetCountry);
+    // Get competitor content
+    const competitors = await getCompetitorContent(keyword, targetCountry);
 
-		// Format competitor data for the prompt
-		const competitorAnalysis = competitors
-			.map(
-				(comp, index) => `
+    // Format competitor data for the prompt
+    const competitorAnalysis = competitors
+      .map(
+        (comp, index) => `
       Competitor ${index + 1}: ${comp.title}
       URL: ${comp.url}
       Outline Structure:
       ${comp.headings.map((h, i) => `${i + 1}. ${h}`).join("\n")}
     `
-			)
-			.join("\n\n");
+      )
+      .join("\n\n");
 
-		console.log("ANALYSIS:", competitorAnalysis);
+    console.log("ANALYSIS:", competitorAnalysis);
 
-		// Create a specialized prompt for collection pages
-		let systemPrompt = `You are an expert SEO content strategist who creates highly optimized, user-focused content outlines.
+    // Create a specialized prompt for collection pages
+    let systemPrompt = `You are an expert SEO content strategist who creates highly optimized, user-focused content outlines.
 					${languageInstructions[language] || languageInstructions["en-US"]}
 					${countryContext[targetCountry]}
 
@@ -292,9 +292,9 @@ export async function POST(req: Request) {
 					- Maintain proper keyword density in headers
 					- Follow E-E-A-T principles in structure`;
 
-		// If this is a collection page, use a specialized prompt
-		if (contentType === "collection") {
-			systemPrompt = `
+    // If this is a collection page, use a specialized prompt
+    if (contentType === "collection") {
+      systemPrompt = `
 			You are an expert e-commerce SEO content strategist specializing in collection page optimization.
 					${languageInstructions[language] || languageInstructions["en-US"]}
 					${countryContext[targetCountry]}
@@ -352,9 +352,9 @@ export async function POST(req: Request) {
 					- Quality or materials section (if applicable)
 					- Why choose this collection (focus on product features, not expert claims)
 					- Call to action section`;
-		}
+    }
 
-		let userPrompt = `Primary Keyword: ${keyword}
+    let userPrompt = `Primary Keyword: ${keyword}
 					Title: ${title}
 					Content Type: ${contentType}
 					
@@ -367,9 +367,9 @@ export async function POST(req: Request) {
 					ONLY OUTPUT THE OUTLINE, NO OTHER TEXT
 					DO NOT INCLUDE FAQ AND A CONCLUSION.`;
 
-		// If this is a collection page, use a specialized user prompt
-		if (contentType === "collection") {
-			userPrompt = `
+    // If this is a collection page, use a specialized user prompt
+    if (contentType === "collection") {
+      userPrompt = `
 			Collection Name/Primary Keyword: ${keyword}
 					Title: ${title}
 					Content Type: ${contentType}
@@ -395,31 +395,31 @@ export async function POST(req: Request) {
 					KEEP THE OUTLINE TO 5-6 MAIN SECTIONS (H2) WITH 2-3 RELEVANT SUBSECTIONS (H3) EACH.
 					ENSURE THE STRUCTURE FOLLOWS A LOGICAL FLOW FROM INTRODUCTION TO CALL-TO-ACTION.
 					ONLY OUTPUT THE OUTLINE, NO OTHER TEXT.`;
-		}
+    }
 
-		const completion = await openai.chat.completions.create({
-			model: "o3-mini-2025-01-31",
-			messages: [
-				{
-					role: "developer",
-					content: systemPrompt,
-				},
-				{
-					role: "user",
-					content: userPrompt,
-				},
-			],
-			//temperature: 0.4,
-		});
+    const completion = await openai.chat.completions.create({
+      model: "o3-mini-2025-01-31",
+      messages: [
+        {
+          role: "developer",
+          content: systemPrompt,
+        },
+        {
+          role: "user",
+          content: userPrompt,
+        },
+      ],
+      //temperature: 0.4,
+    });
 
-		const outline =
-			completion.choices[0]?.message?.content?.trim().split("\n") || [];
-		return NextResponse.json({ outline });
-	} catch (error) {
-		console.error("Error:", error);
-		return NextResponse.json(
-			{ error: "Failed to generate outline" },
-			{ status: 500 }
-		);
-	}
+    const outline =
+      completion.choices[0]?.message?.content?.trim().split("\n") || [];
+    return NextResponse.json({ outline });
+  } catch (error) {
+    console.error("Error:", error);
+    return NextResponse.json(
+      { error: "Failed to generate outline" },
+      { status: 500 }
+    );
+  }
 }
