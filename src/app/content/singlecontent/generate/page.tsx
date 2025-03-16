@@ -22,6 +22,7 @@ interface FormData {
 interface OutlineItem {
   content: string;
   level: string;
+  context?: string;
 }
 
 export default function GenerateContentPage() {
@@ -36,7 +37,7 @@ export default function GenerateContentPage() {
 
   useEffect(() => {
     const storedFormData = localStorage.getItem("contentFormData");
-    const storedOutline = localStorage.getItem("contentOutline");
+    const storedOutline = localStorage.getItem("outlineData");
     console.log("Initial localStorage check:", {
       storedFormData,
       storedOutline,
@@ -50,10 +51,10 @@ export default function GenerateContentPage() {
 
     try {
       const parsedFormData = JSON.parse(storedFormData);
-      const parsedOutline = JSON.parse(storedOutline);
-      console.log("Parsed data:", { parsedFormData, parsedOutline });
+      const parsedData = JSON.parse(storedOutline);
+      console.log("Parsed data:", { parsedFormData, parsedData });
       setFormData(parsedFormData);
-      setOutline(parsedOutline);
+      setOutline(parsedData.outline);
     } catch (error) {
       console.error("Error parsing stored data:", error);
       router.push("/content/singlecontent");

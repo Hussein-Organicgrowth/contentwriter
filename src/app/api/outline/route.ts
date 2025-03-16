@@ -247,7 +247,6 @@ export async function POST(req: Request) {
 
     console.log("ANALYSIS:", competitorAnalysis);
 
-    // Create a specialized prompt for collection pages
     let systemPrompt = `You are an expert SEO content strategist who creates highly optimized, user-focused content outlines.
 					${languageInstructions[language] || languageInstructions["en-US"]}
 					${countryContext[targetCountry]}

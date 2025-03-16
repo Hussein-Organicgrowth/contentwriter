@@ -123,7 +123,6 @@ export async function POST(req: Request) {
       title,
       outline,
       relatedKeywords,
-      tone,
       language = "en-US",
       targetCountry = "US",
       companyInfo,
@@ -136,12 +135,10 @@ export async function POST(req: Request) {
       async start(controller) {
         try {
           let fullContent = "";
-          const processedSections = new Set(); // Track normalized section titles
+          const processedSections = new Set();
 
-          // Helper function to normalize section titles for comparison
           const normalizeTitle = (title: string) => title.toLowerCase().trim();
 
-          // Send the main title
           const titleContent = `<h1>${title}</h1>\n\n`;
           controller.enqueue(
             encoder.encode(
@@ -152,25 +149,15 @@ export async function POST(req: Request) {
           );
           fullContent += titleContent;
 
-          // Process all sections from the outline
           for (let i = 0; i < outline.length; i++) {
             const section = outline[i];
             const normalizedTitle = normalizeTitle(section.content);
 
-            console.log(`Processing section ${i + 1}:`, {
-              content: section.content,
-              normalizedTitle,
-              isProcessed: processedSections.has(normalizedTitle),
-              headingLevel: section.level,
-            });
-
-            // Skip if we've already processed this section
             if (processedSections.has(normalizedTitle)) {
               console.log(`Skipping duplicate section: ${section.content}`);
               continue;
             }
 
-            // Send progress update
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({
@@ -180,7 +167,6 @@ export async function POST(req: Request) {
               )
             );
 
-            // Generate content
             const completion = await generateSection(
               openai,
               keyword,
@@ -188,18 +174,15 @@ export async function POST(req: Request) {
               section.content,
               relatedKeywords,
               fullContent,
-              false,
-              tone,
               language,
               targetCountry,
+              section.context || "",
               companyInfo
             );
 
-            // Create section header using the level from the outline
             const headingLevel = section.level;
             const sectionHeader = `\n<${headingLevel}>${section.content}</${headingLevel}>\n`;
 
-            // Send the header first
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({
@@ -209,12 +192,10 @@ export async function POST(req: Request) {
             );
             fullContent += sectionHeader;
 
-            // Stream the content chunks as they come
             let isFirstChunk = true;
             for await (const chunk of completion) {
               const content = chunk.choices[0]?.delta?.content || "";
               if (content) {
-                // For the first chunk, we'll check and remove any heading that might be at the start
                 if (isFirstChunk) {
                   const headingPattern = new RegExp(
                     `<h[1-6]>${section.content}</h[1-6]>`,
@@ -233,7 +214,6 @@ export async function POST(req: Request) {
                   }
                   isFirstChunk = false;
                 } else {
-                  // Stream subsequent chunks directly
                   controller.enqueue(
                     encoder.encode(
                       `data: ${JSON.stringify({
@@ -246,7 +226,6 @@ export async function POST(req: Request) {
               }
             }
 
-            // Mark this section as processed
             processedSections.add(normalizedTitle);
             console.log(
               "Updated processed sections:",
@@ -254,7 +233,6 @@ export async function POST(req: Request) {
             );
           }
 
-          // Send the done message in proper JSON format
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
