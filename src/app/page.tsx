@@ -25,6 +25,7 @@ export default async function Home() {
 
   return (
     <div>
+      <h1>Hello is me anton </h1>
       <Suspense fallback={<div>Loading...</div>}>
         <Dashboard websites={websites} sharedWebsites={sharedWebsites} />
       </Suspense>
