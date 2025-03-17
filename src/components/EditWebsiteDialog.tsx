@@ -51,11 +51,13 @@ const formSchema = z.object({
 interface EditWebsiteDialogProps {
 	website: IWebsite;
 	onUpdate: () => void;
+	children?: React.ReactNode;
 }
 
 export function EditWebsiteDialog({
 	website,
 	onUpdate,
+	children,
 }: EditWebsiteDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
@@ -121,13 +123,15 @@ export function EditWebsiteDialog({
 	return (
 		<Dialog open={open} onOpenChange={setOpen}>
 			<DialogTrigger asChild>
-				<Button
-					variant="ghost"
-					size="icon"
-					className="text-muted-foreground hover:text-primary hover:bg-primary/10"
-					onClick={handleEditButtonClick}>
-					<Edit className="h-4 w-4" />
-				</Button>
+				{children || (
+					<Button
+						variant="ghost"
+						size="icon"
+						className="text-muted-foreground hover:text-primary hover:bg-primary/10"
+						onClick={handleEditButtonClick}>
+						<Edit className="h-4 w-4" />
+					</Button>
+				)}
 			</DialogTrigger>
 			<DialogContent
 				className="sm:max-w-[800px] max-h-[95vh] overflow-y-auto p-6 md:p-8"

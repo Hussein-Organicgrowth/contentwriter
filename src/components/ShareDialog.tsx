@@ -19,9 +19,10 @@ import { IWebsite } from "@/models/Website";
 interface ShareDialogProps {
   website: IWebsite;
   onShare?: () => void;
+  children?: React.ReactNode;
 }
 
-export function ShareDialog({ website, onShare }: ShareDialogProps) {
+export function ShareDialog({ website, onShare, children }: ShareDialogProps) {
   const [email, setEmail] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -64,13 +65,15 @@ export function ShareDialog({ website, onShare }: ShareDialogProps) {
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-muted-foreground hover:text-primary"
-        >
-          <Share className="h-4 w-4" />
-        </Button>
+        {children || (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground hover:text-primary"
+          >
+            <Share className="h-4 w-4" />
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
