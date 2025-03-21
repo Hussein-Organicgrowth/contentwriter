@@ -1,6 +1,6 @@
 "use client";
 
-import { Globe, Trash2, Users, Check, Edit } from "lucide-react";
+import { Globe, Trash2, Users, Check, Edit, MoreVertical, Share } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { IWebsite } from "@/models/Website";
@@ -36,6 +36,11 @@ import {
 	HoverCardContent,
 	HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface DashboardProps {
 	websites: IWebsite[];
@@ -168,7 +173,7 @@ export default function Dashboard({
 							isSelected ? "pb-3" : ""
 						}`}>
 						<div
-							className={`relative h-12 w-12 flex items-center justify-center rounded-lg border ${
+							className={`h-12 w-12 flex items-center justify-center rounded-lg border box-border overflow-clip ${
 								isSelected ? "bg-white" : "bg-card"
 							}`}>
 							<Image
@@ -176,7 +181,7 @@ export default function Dashboard({
 								alt={`${website.name} favicon`}
 								width={32}
 								height={32}
-								className="h-8 w-8"
+								className="h-full w-full"
 								onError={(e) => {
 									const target = e.target as HTMLElement;
 									target.style.display = "none";
@@ -185,7 +190,7 @@ export default function Dashboard({
 										?.classList.remove("hidden");
 								}}
 							/>
-							<Globe className="h-8 w-8 fallback-icon hidden absolute" />
+							<Globe className="h-full w-full fallback-icon hidden absolute" />
 						</div>
 						<div className="space-y-1 flex-1">
 							<CardTitle className={isSelected ? "text-blue-700" : ""}>
@@ -195,146 +200,176 @@ export default function Dashboard({
 						</div>
 						{isOwned && (
 							<div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-								{website.sharedUsers?.length > 0 ? (
-									<HoverCard>
-										<HoverCardTrigger asChild>
-											<Button
-												variant="ghost"
-												size="icon"
-												className={`${
-													isSelected
-														? "text-blue-600 hover:text-blue-700 hover:bg-blue-100"
-														: "text-muted-foreground hover:text-primary"
-												} relative`}>
-												<Users className="h-4 w-4" />
-												<span className="absolute -top-1 -right-1 bg-primary text-primary-foreground rounded-full w-4 h-4 text-xs flex items-center justify-center">
-													{website.sharedUsers.length}
-												</span>
-											</Button>
-										</HoverCardTrigger>
-										<HoverCardContent className="w-80">
-											<div className="space-y-1">
-												<h4 className="text-sm font-semibold">Shared with</h4>
-												<div className="text-sm text-muted-foreground">
-													{website.sharedUsers.map((email) => (
-														<div
-															key={email}
-															className="flex items-center justify-between py-1">
-															<span>{email}</span>
-															<Button
-																variant="ghost"
-																size="sm"
-																className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-																onClick={async () => {
-																	try {
-																		const response = await fetch(
-																			`/api/website/share`,
-																			{
-																				method: "DELETE",
-																				headers: {
-																					"Content-Type": "application/json",
-																				},
-																				body: JSON.stringify({
-																					websiteId: website._id,
-																					email,
-																				}),
-																			}
-																		);
-
-																		if (!response.ok) {
-																			throw new Error("Failed to remove user");
-																		}
-
-																		// Update the local state
-																		const updatedWebsites = [...ownedWebsites];
-																		const websiteIndex =
-																			updatedWebsites.findIndex(
-																				(w) => w._id === website._id
-																			);
-
-																		if (websiteIndex !== -1) {
-																			// Create a new array of shared users without the removed email
-																			const filteredSharedUsers =
-																				updatedWebsites[
-																					websiteIndex
-																				].sharedUsers.filter(
-																					(e) => e !== email
-																				);
-
-																			// Update the website with the new sharedUsers array
-																			// This preserves the IWebsite type
-																			updatedWebsites[
-																				websiteIndex
-																			].sharedUsers = filteredSharedUsers;
-																			setOwnedWebsites(updatedWebsites);
-																		}
-
-																		toast.success("User removed successfully");
-																	} catch (error) {
-																		console.error(
-																			"Error removing user:",
-																			error
-																		);
-																		toast.error("Failed to remove user");
-																	}
-																}}>
-																Remove
-															</Button>
-														</div>
-													))}
-												</div>
-											</div>
-										</HoverCardContent>
-									</HoverCard>
-								) : null}
-								<ShareDialog
-									website={website}
-									onShare={() => router.refresh()}
-								/>
-								{isOwned && (
-									<EditWebsiteDialog
-										website={website}
-										onUpdate={() => {
-											router.refresh();
-											// Update the local state
-											const updatedWebsites = [...ownedWebsites];
-											const websiteIndex = updatedWebsites.findIndex(
-												(w) => w._id === website._id
-											);
-											if (websiteIndex !== -1) {
-												// Refresh the page to get the updated data
-												router.refresh();
-											}
-										}}
-									/>
-								)}
-								<AlertDialog>
-									<AlertDialogTrigger asChild>
+								<Popover>
+									<PopoverTrigger asChild>
 										<Button
 											variant="ghost"
 											size="icon"
-											className="text-destructive hover:text-destructive hover:bg-destructive/10">
-											<Trash2 className="h-4 w-4" />
+											className="text-muted-foreground hover:text-primary hover:bg-blue-100">
+											<MoreVertical  />
 										</Button>
-									</AlertDialogTrigger>
-									<AlertDialogContent>
-										<AlertDialogHeader>
-											<AlertDialogTitle>Are you sure?</AlertDialogTitle>
-											<AlertDialogDescription>
-												This action cannot be undone. This will permanently
-												delete {website.name} and all its associated content.
-											</AlertDialogDescription>
-										</AlertDialogHeader>
-										<AlertDialogFooter>
-											<AlertDialogCancel>Cancel</AlertDialogCancel>
-											<AlertDialogAction
-												onClick={() => handleDeleteWebsite(websiteId)}
-												className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-												Delete
-											</AlertDialogAction>
-										</AlertDialogFooter>
-									</AlertDialogContent>
-								</AlertDialog>
+									</PopoverTrigger>
+									<PopoverContent className="w-56 p-2">
+										<div className="flex flex-col gap-1">
+											{website.sharedUsers?.length > 0 ? (
+												<HoverCard>
+													<HoverCardTrigger asChild>
+														<Button
+															variant="ghost"
+															size="sm"
+															className="w-full justify-start text-muted-foreground hover:text-primary">
+															<Users className="h-4 w-4 mr-2" />
+															Shared Users
+															<span className="ml-auto bg-primary text-primary-foreground rounded-full w-4 h-4 text-xs flex items-center justify-center">
+																{website.sharedUsers.length}
+															</span>
+														</Button>
+													</HoverCardTrigger>
+													<HoverCardContent 
+														className="w-80" 
+														align="start"
+														alignOffset={-8}
+														side="right"
+														sideOffset={5}>
+														<div className="space-y-1">
+															<h4 className="text-sm font-semibold">Shared with</h4>
+															<div className="text-sm text-muted-foreground">
+																{website.sharedUsers.map((email) => (
+																	<div
+																		key={email}
+																		className="flex items-center justify-between py-1">
+																		<span>{email}</span>
+																		<Button
+																			variant="ghost"
+																			size="sm"
+																			className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+																			onClick={async () => {
+																				try {
+																					const response = await fetch(
+																						`/api/website/share`,
+																						{
+																							method: "DELETE",
+																							headers: {
+																								"Content-Type": "application/json",
+																							},
+																							body: JSON.stringify({
+																								websiteId: website._id,
+																								email,
+																							}),
+																						}
+																					);
+
+																					if (!response.ok) {
+																						throw new Error("Failed to remove user");
+																					}
+
+																					// Update the local state
+																					const updatedWebsites = [...ownedWebsites];
+																					const websiteIndex =
+																						updatedWebsites.findIndex(
+																							(w) => w._id === website._id
+																						);
+
+																					if (websiteIndex !== -1) {
+																						// Create a new array of shared users without the removed email
+																						const filteredSharedUsers =
+																							updatedWebsites[
+																								websiteIndex
+																							].sharedUsers.filter(
+																								(e) => e !== email
+																							);
+
+																						// Update the website with the new sharedUsers array
+																						updatedWebsites[
+																							websiteIndex
+																						].sharedUsers = filteredSharedUsers;
+																						setOwnedWebsites(updatedWebsites);
+																					}
+
+																					toast.success("User removed successfully");
+																				} catch (error) {
+																					console.error(
+																						"Error removing user:",
+																						error
+																					);
+																					toast.error("Failed to remove user");
+																				}
+																			}}>
+																			Remove
+																		</Button>
+																	</div>
+																))}
+															</div>
+														</div>
+													</HoverCardContent>
+												</HoverCard>
+											) : null}
+											<ShareDialog
+												website={website}
+												onShare={() => router.refresh()}>
+												<Button
+													variant="ghost"
+													size="sm"
+													className="w-full justify-start text-muted-foreground hover:text-primary">
+													<Share className="h-4 w-4 mr-2" />
+													Share Website
+												</Button>
+											</ShareDialog>
+											{isOwned && (
+												<EditWebsiteDialog
+													website={website}
+													onUpdate={() => {
+														router.refresh();
+														// Update the local state
+														const updatedWebsites = [...ownedWebsites];
+														const websiteIndex = updatedWebsites.findIndex(
+															(w) => w._id === website._id
+														);
+														if (websiteIndex !== -1) {
+															// Refresh the page to get the updated data
+															router.refresh();
+														}
+													}}>
+													<Button
+														variant="ghost"
+														size="sm"
+														className="w-full justify-start text-muted-foreground hover:text-primary">
+														<Edit className="h-4 w-4 mr-2" />
+														Edit Website
+													</Button>
+												</EditWebsiteDialog>
+											)}
+											<AlertDialog>
+												<AlertDialogTrigger asChild>
+													<Button
+														variant="ghost"
+														size="sm"
+														className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10">
+														<Trash2 className="h-4 w-4 mr-2" />
+														Delete Website
+													</Button>
+												</AlertDialogTrigger>
+												<AlertDialogContent>
+													<AlertDialogHeader>
+														<AlertDialogTitle>Are you sure?</AlertDialogTitle>
+														<AlertDialogDescription>
+															This action cannot be undone. This will permanently
+															delete {website.name} and all its associated content.
+														</AlertDialogDescription>
+													</AlertDialogHeader>
+													<AlertDialogFooter>
+														<AlertDialogCancel>Cancel</AlertDialogCancel>
+														<AlertDialogAction
+															onClick={() => handleDeleteWebsite(websiteId)}
+															className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+															Delete
+														</AlertDialogAction>
+													</AlertDialogFooter>
+												</AlertDialogContent>
+											</AlertDialog>
+										</div>
+									</PopoverContent>
+								</Popover>
 							</div>
 						)}
 					</CardHeader>
