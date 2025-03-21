@@ -60,6 +60,7 @@ export default function SingleContent() {
   const [targetCountry, setTargetCountry] = useState("DK");
   const [contentType, setContentType] = useState("article");
   const [context, setContext] = useState("");
+  const [targetWordCount, setTargetWordCount] = useState(1000);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedWebsite, setSelectedWebsite] = useState<Website | null>(null);
   const [includeBusinessName, setIncludeBusinessName] = useState(false);
@@ -203,6 +204,7 @@ export default function SingleContent() {
       relatedKeywords,
       selectedWebsite,
       context,
+      targetWordCount,
     };
 
     // Store the form data in localStorage for the outline page
@@ -343,6 +345,30 @@ export default function SingleContent() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label className="text-gray-700 font-bold">
+                  Target Word Count
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    value={targetWordCount}
+                    onChange={(e) => setTargetWordCount(Number(e.target.value))}
+                    min={300}
+                    max={5000}
+                    step={100}
+                    className="bg-white"
+                    disabled={!canGenerate}
+                  />
+                  <span className="flex items-center text-gray-500">words</span>
+                </div>
+                <p className="text-sm text-gray-500">
+                  Recommended: 500-1500 words for most content types
+                </p>
               </div>
             </div>
 

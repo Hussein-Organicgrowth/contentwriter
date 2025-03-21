@@ -23,8 +23,14 @@ async function generateSection(
     summary: string;
     toneofvoice: string;
     targetAudience: string;
-  }
+  },
+  targetWordCount: number = 1000,
+  sectionIndex: number = 0,
+  totalSections: number = 5
 ) {
+  // Calculate words per section based on total word count and number of sections
+  const wordsPerSection = Math.round(targetWordCount / totalSections);
+
   const additionalContext = context
     ? `Additional Context from the user:\n${context}\nPlease consider this context while writing the content.\n\n`
     : "";
@@ -59,6 +65,7 @@ Primary Objectives:
 3. Embody ${companyInfo.name}'s authentic voice
 4. ${languageInstruction}
 5. ${countryContext}
+6. Write approximately ${wordsPerSection} words for this section
 
 Writing Approach:
 - Create flowing, narrative-style content that tells a story
@@ -67,18 +74,22 @@ Writing Approach:
 - Write as if having a one-on-one conversation with the reader
 - Incorporate examples and scenarios organically
 - Keep the tone professional but warm and approachable
+- Be concise and stay within the word limit
+- Focus on quality over quantity
 
 SEO & Structure:
 - Naturally weave in key terms without forcing them
 - Use short, focused paragraphs for readability
 - Break up long explanations with relevant examples
 - Only use lists when they truly enhance understanding
+- Keep paragraphs focused and concise
 
 ${additionalContext}`,
       },
       {
         role: "user",
         content: `Write a natural, flowing section about "${section}" within "${keyword}".
+Target word count for this section: ${wordsPerSection} words
 
 Context & Voice:
 ${companyContext}
@@ -89,6 +100,8 @@ Content Direction:
 - Address the reader's needs and questions naturally
 - Maintain a smooth flow between ideas
 - Keep paragraphs focused but conversational (2-4 sentences)
+- Stay within the target word count of ${wordsPerSection} words
+- Be concise and avoid unnecessary elaboration
 
 Previous Content (for context):
 ${contextPrompt}
@@ -104,7 +117,6 @@ Formatting:
 - Avoid excessive formatting - let the content flow naturally
 - NO headings or titles
 
- 
 Remember: Write authentically as ${
           companyInfo.name
         }, using "we" and "our" in a natural way.`,
@@ -126,6 +138,7 @@ export async function POST(req: Request) {
       language = "en-US",
       targetCountry = "US",
       companyInfo,
+      targetWordCount = 1000,
     } = await req.json();
 
     console.log("Received outline:", JSON.stringify(outline, null, 2));
@@ -136,6 +149,7 @@ export async function POST(req: Request) {
         try {
           let fullContent = "";
           const processedSections = new Set();
+          const totalSections = outline.length;
 
           const normalizeTitle = (title: string) => title.toLowerCase().trim();
 
@@ -177,7 +191,10 @@ export async function POST(req: Request) {
               language,
               targetCountry,
               section.context || "",
-              companyInfo
+              companyInfo,
+              targetWordCount,
+              i,
+              totalSections
             );
 
             const headingLevel = section.level;

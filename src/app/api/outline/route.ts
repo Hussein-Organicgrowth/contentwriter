@@ -145,12 +145,14 @@ export async function POST(req: Request) {
       language = "en-US",
       targetCountry,
       contentType,
+      targetWordCount = 1000, // Default to 1000 words if not specified
     }: {
       keyword: string;
       title: string;
       language?: LanguageCode;
       targetCountry: CountryCode;
       contentType: string;
+      targetWordCount?: number;
     } = await req.json();
 
     const languageInstructions: Record<LanguageCode, string> = {
@@ -251,6 +253,9 @@ export async function POST(req: Request) {
 					${languageInstructions[language] || languageInstructions["en-US"]}
 					${countryContext[targetCountry]}
 
+					Target Word Count: ${targetWordCount} words
+					Average Words per Section: ${Math.round(targetWordCount / 5)} words
+
 					I will provide you with:
 					- A primary keyword
 					- A title
@@ -264,6 +269,7 @@ export async function POST(req: Request) {
 					- Includes semantic SEO elements and related topics
 					- Maintains optimal content depth for the target keyword
 					- Ensures proper keyword distribution across sections
+					- Stays within the target word count by creating an appropriate number of sections
 
 					SEO Optimization Guidelines:
 					- H2 headers should include primary or secondary keywords when natural
@@ -289,7 +295,10 @@ export async function POST(req: Request) {
 					- Add comparison sections when relevant
 					- Include data/statistics sections for backlink potential
 					- Maintain proper keyword density in headers
-					- Follow E-E-A-T principles in structure`;
+					- Follow E-E-A-T principles in structure
+					- Create an outline that will result in approximately ${targetWordCount} words total
+					- Limit the number of sections based on the target word count
+					- For ${targetWordCount} words, create 4-5 main sections with 2-3 subsections each`;
 
     // If this is a collection page, use a specialized prompt
     if (contentType === "collection") {
