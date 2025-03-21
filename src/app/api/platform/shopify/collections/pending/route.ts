@@ -62,7 +62,7 @@ export async function POST(req: Request) {
     };
 
     console.log("Adding new pending description:", newPendingDescription);
-
+    console.log("Website:", website);
     // Add the new pending description
     website.pendingCollectionDescriptions.push(newPendingDescription);
 
