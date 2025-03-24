@@ -2,7 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+@theme {
+  --color-primary: rgba(124, 42, 232, 1);
+  --color-primary-hover: rgba(124, 42, 232, 0.8);
+  --color-secondary: rgba(100, 116, 139, 1);
+  --color-accent: rgba(241, 245, 249, 1);
+  --color-border: rgba(255, 255, 255, 0.8);
+}
+
+/* :root {
   --primary: #3b82f6;
   --primary-hover: #2563eb;
   --secondary: #64748b;
@@ -18,7 +26,7 @@
     --accent: #1e293b;
     --border: #334155;
   }
-}
+} */
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;

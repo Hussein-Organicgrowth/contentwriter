@@ -150,7 +150,7 @@ export default function Dashboard({
 				<Card
 					className={`transition-colors cursor-pointer relative ${
 						isSelected
-							? "ring-2 ring-primary border-primary bg-blue-50 shadow-md"
+							? "border-border shadow-md"
 							: "hover:bg-muted/50"
 					} ${!isOwned ? "border-dashed" : ""}`}
 					onClick={(e) => {
@@ -164,7 +164,7 @@ export default function Dashboard({
 						}
 					}}>
 					{isSelected && (
-						<div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1 shadow-sm">
+						<div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1 shadow-sm hidden">
 							<Check className="h-4 w-4" />
 						</div>
 					)}
@@ -205,7 +205,7 @@ export default function Dashboard({
 										<Button
 											variant="ghost"
 											size="icon"
-											className="text-muted-foreground hover:text-primary hover:bg-blue-100">
+											className="text-muted-foreground hover:text-primary">
 											<MoreVertical  />
 										</Button>
 									</PopoverTrigger>
@@ -388,22 +388,22 @@ export default function Dashboard({
 					</CardContent>
 					<CardFooter className={`flex gap-2 ${isSelected ? "pt-3" : ""}`}>
 						<Button
-							variant={isSelected ? "secondary" : "outline"}
+							className="w-full"
+							variant={isSelected ? "default" : "outline"}
+							onClick={() => {
+								handleCompanySelect(website);
+							}}
+							asChild>
+							<Link href="/content">Create Content</Link>
+						</Button>
+						<Button
+							variant={isSelected ? "ghost" : "ghost"}
 							className="w-full"
 							onClick={() => {
 								handleCompanySelect(website);
 							}}
 							asChild>
 							<Link href="/dashboard/viewcontent">View Content</Link>
-						</Button>
-						<Button
-							className="w-full"
-							variant={isSelected ? "outline" : "secondary"}
-							onClick={() => {
-								handleCompanySelect(website);
-							}}
-							asChild>
-							<Link href="/content">Create Content</Link>
 						</Button>
 					</CardFooter>
 				</Card>
