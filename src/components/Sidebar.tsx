@@ -109,8 +109,15 @@ export function Sidebar() {
           isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
         } lg:relative lg:block`}
       >
-        <div className="flex h-16 shrink-0 items-center justify-between px-6 border-b">
-          <span className="text-lg font-semibold">TekstFlow </span>
+        <div className="h-16 p-10 border-b flex items-center justify-center">
+          {/* <span className="text-lg font-semibold">TekstFlow </span> */}
+          <Image
+            src="/copybuddy_logo_dark_text.svg"
+            alt="CopyBuddy Logo"
+            width={100}
+            height={100}
+            className="flex-grow"
+          />
         </div>
 
         <div className="flex flex-col justify-between flex-1 p-6 overflow-y-auto">
