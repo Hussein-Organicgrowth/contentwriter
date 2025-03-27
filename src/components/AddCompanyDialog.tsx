@@ -183,6 +183,15 @@ export function AddCompanyDialog() {
 			return;
 		}
 
+		// Ensure URL starts with https://
+		let websiteUrl = company.domain;
+		if (
+			!websiteUrl.startsWith("http://") &&
+			!websiteUrl.startsWith("https://")
+		) {
+			websiteUrl = `https://${websiteUrl}`;
+		}
+
 		try {
 			const response = await fetch("/api/website", {
 				method: "POST",
@@ -191,7 +200,7 @@ export function AddCompanyDialog() {
 				},
 				body: JSON.stringify({
 					name: company.name,
-					website: company.domain,
+					website: websiteUrl,
 					description: company.description,
 					summary: company.description,
 					toneofvoice: company.toneOfVoice,
@@ -264,9 +273,18 @@ export function AddCompanyDialog() {
 									type="url"
 									className="flex-1 h-10 rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
 									value={company.domain}
-									onChange={(e) =>
-										setCompany((prev) => ({ ...prev, domain: e.target.value }))
-									}
+									onChange={(e) => {
+										let value = e.target.value;
+										// Auto-prepend https:// if user starts typing without it
+										if (
+											value &&
+											!value.startsWith("http://") &&
+											!value.startsWith("https://")
+										) {
+											value = `https://${value}`;
+										}
+										setCompany((prev) => ({ ...prev, domain: value }));
+									}}
 									placeholder="https://example.com"
 									required
 								/>

@@ -107,6 +107,7 @@ export default function ProductsPage() {
 	const [storeName, setStoreName] = useState("");
 	const [accessToken, setAccessToken] = useState("");
 	const [company, setCompany] = useState<string>("");
+	const [storeNameError, setStoreNameError] = useState<string>("");
 	const [selectedStatus, setSelectedStatus] = useState<StatusType>("all");
 	const [isGenerating, setIsGenerating] = useState<{ [key: string]: boolean }>(
 		{}
@@ -254,9 +255,29 @@ export default function ProductsPage() {
 		}
 	};
 
+	const validateStoreName = (value: string) => {
+		// Remove https:// or http:// if present
+		value = value.replace(/^https?:\/\//, "");
+
+		// Check if the URL matches the Shopify store format
+		if (!value.match(/^[a-zA-Z0-9-]+\.myshopify\.com$/)) {
+			setStoreNameError(
+				"Please enter a valid Shopify store URL (e.g., your-store.myshopify.com)"
+			);
+			return false;
+		}
+
+		setStoreNameError("");
+		return true;
+	};
+
 	const handleConnect = async () => {
 		if (!company) {
 			toast.error("Company information not found");
+			return;
+		}
+
+		if (!validateStoreName(storeName)) {
 			return;
 		}
 
@@ -296,6 +317,10 @@ export default function ProductsPage() {
 	const handleUpdateSettings = async () => {
 		if (!company) {
 			toast.error("Company information not found");
+			return;
+		}
+
+		if (!validateStoreName(storeName)) {
 			return;
 		}
 
@@ -1308,16 +1333,17 @@ export default function ProductsPage() {
 								<div className="flex-1 overflow-hidden">
 									{isEditing ? (
 										<div className="h-full relative">
-											<RichTextEditor
-												content={editedDescription}
-												onChange={setEditedDescription}
-											/>
+											<div className="absolute inset-0">
+												<RichTextEditor
+													content={editedDescription}
+													onChange={setEditedDescription}
+												/>
+											</div>
 											<div className="absolute bottom-4 right-4 z-10 flex gap-2">
 												<Button
 													size="sm"
 													onClick={() => {
 														setIsEditing(false);
-														// Reset to the last saved description
 														setEditedDescription(
 															localPendingDescription?.newDescription || ""
 														);
@@ -1616,8 +1642,18 @@ export default function ProductsPage() {
 								id="storeName"
 								placeholder="your-store-name.myshopify.com"
 								value={storeName}
-								onChange={(e) => setStoreName(e.target.value)}
+								onChange={(e) => {
+									let value = e.target.value;
+									// Remove https:// or http:// if present
+									value = value.replace(/^https?:\/\//, "");
+									setStoreName(value);
+									validateStoreName(value);
+								}}
+								className={cn(storeNameError && "border-red-500")}
 							/>
+							{storeNameError && (
+								<p className="text-sm text-red-500">{storeNameError}</p>
+							)}
 							<p className="text-sm text-gray-500">
 								Enter your full Shopify store URL (e.g.,
 								your-store.myshopify.com)
@@ -1957,8 +1993,18 @@ export default function ProductsPage() {
 								id="updateStoreName"
 								placeholder="your-store-name.myshopify.com"
 								value={storeName}
-								onChange={(e) => setStoreName(e.target.value)}
+								onChange={(e) => {
+									let value = e.target.value;
+									// Remove https:// or http:// if present
+									value = value.replace(/^https?:\/\//, "");
+									setStoreName(value);
+									validateStoreName(value);
+								}}
+								className={cn(storeNameError && "border-red-500")}
 							/>
+							{storeNameError && (
+								<p className="text-sm text-red-500">{storeNameError}</p>
+							)}
 							<p className="text-sm text-gray-500">
 								Enter your full Shopify store URL (e.g.,
 								your-store.myshopify.com)
