@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import "remixicon/fonts/remixicon.css";
+import { toast } from "react-hot-toast";
 
 // Add custom extension for highlighted content
 import { Node, JSONContent } from "@tiptap/core";
@@ -161,17 +162,10 @@ declare global {
 }
 
 // Add this new component before the PaperCanvas component
-const FloatingMenu = ({
-  editor,
-  onImprove,
-  onExpand,
-}: {
-  editor: Editor;
-  onImprove: () => void;
-  onExpand: () => void;
-}) => {
+const FloatingMenu = ({ editor }: { editor: Editor }) => {
   const [show, setShow] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const updatePosition = () => {
@@ -203,11 +197,81 @@ const FloatingMenu = ({
     };
   }, [editor]);
 
+  const handleEnhanceText = async (
+    action: "expand" | "improve" | "explain"
+  ) => {
+    if (!editor) return;
+
+    const { from, to } = editor.state.selection;
+    const selectedText = editor.state.doc.textBetween(from, to);
+
+    if (!selectedText) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/enhance-text", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: selectedText,
+          action,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to enhance text");
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No reader available");
+
+      let enhancedText = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = new TextDecoder().decode(value);
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const dataStr = line.slice(5).trim();
+            if (dataStr === "[DONE]") continue;
+
+            try {
+              const data = JSON.parse(dataStr);
+              if (data.content) {
+                enhancedText += data.content;
+              }
+            } catch (e) {
+              console.error("Failed to parse chunk:", e);
+            }
+          }
+        }
+      }
+
+      if (enhancedText) {
+        editor
+          .chain()
+          .focus()
+          .deleteRange({ from, to })
+          .insertContent(enhancedText)
+          .run();
+      }
+    } catch (error) {
+      console.error("Error enhancing text:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   if (!show) return null;
 
   return (
     <div
-      className="fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200 p-2 flex gap-2"
+      className="fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200 p-2 flex flex-wrap gap-2"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
@@ -217,9 +281,10 @@ const FloatingMenu = ({
       <Button
         variant="ghost"
         size="sm"
-        onClick={onImprove}
+        onClick={() => handleEnhanceText("improve")}
         className="h-8 px-3 hover:bg-gray-100 flex items-center gap-2"
         title="Improve selection"
+        disabled={isLoading}
       >
         <Wand2 className="h-4 w-4" />
         <span className="text-sm">Improve</span>
@@ -227,12 +292,24 @@ const FloatingMenu = ({
       <Button
         variant="ghost"
         size="sm"
-        onClick={onExpand}
+        onClick={() => handleEnhanceText("expand")}
         className="h-8 px-3 hover:bg-gray-100 flex items-center gap-2"
         title="Expand selection"
+        disabled={isLoading}
       >
         <Expand className="h-4 w-4" />
         <span className="text-sm">Expand</span>
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => handleEnhanceText("explain")}
+        className="h-8 px-3 hover:bg-gray-100 flex items-center gap-2"
+        title="Explain in detail"
+        disabled={isLoading}
+      >
+        <i className="ri-question-line text-xl" />
+        <span className="text-sm">Explain</span>
       </Button>
     </div>
   );
@@ -576,36 +653,37 @@ export default function PaperCanvas({
     setPendingChanges((prev) => [...prev, newChange]);
   };
 
-  const handleImproveSelection = async () => {
-    if (!editor) return;
+  // Add new function to handle URL fetching
+  const handleFetchUrl = async () => {
+    if (!url) return;
 
-    const { from, to } = editor.state.selection;
-    const selectedText = editor.state.doc.textBetween(from, to);
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/content/fetch-url", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url }),
+      });
 
-    if (!selectedText) return;
+      if (!response.ok) {
+        throw new Error("Failed to fetch content");
+      }
 
-    setUserInput(`Please improve this section: "${selectedText}"`);
-    const formEvent = new Event(
-      "submit"
-    ) as unknown as React.FormEvent<HTMLFormElement>;
-    handleSubmit(formEvent);
-  };
-
-  const handleExpandSelection = async () => {
-    if (!editor) return;
-
-    const { from, to } = editor.state.selection;
-    const selectedText = editor.state.doc.textBetween(from, to);
-
-    if (!selectedText) return;
-
-    setUserInput(
-      `Please expand this section with more details: "${selectedText}"`
-    );
-    const formEvent = new Event(
-      "submit"
-    ) as unknown as React.FormEvent<HTMLFormElement>;
-    handleSubmit(formEvent);
+      const data = await response.json();
+      if (data.content) {
+        editor?.commands.setContent(data.content);
+        setContent(data.content);
+        onContentChange?.(data.content);
+        toast.success("Content fetched successfully!");
+      }
+    } catch (error) {
+      console.error("Error fetching URL:", error);
+      toast.error("Failed to fetch content from URL. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -641,12 +719,30 @@ export default function PaperCanvas({
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Website URL (Optional)
                 </label>
-                <Input
-                  type="url"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="Enter URL to crawl content"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="Enter URL to crawl content"
+                    disabled={isLoading}
+                  />
+                  <Button
+                    onClick={handleFetchUrl}
+                    disabled={isLoading || !url}
+                    variant="secondary"
+                    className="whitespace-nowrap"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Fetching...
+                      </>
+                    ) : (
+                      "Fetch Content"
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           </Card>
@@ -814,13 +910,7 @@ export default function PaperCanvas({
               </div>
 
               {/* Add FloatingMenu component */}
-              {editor && (
-                <FloatingMenu
-                  editor={editor}
-                  onImprove={handleImproveSelection}
-                  onExpand={handleExpandSelection}
-                />
-              )}
+              {editor && <FloatingMenu editor={editor} />}
 
               {/* Editor Content */}
               <ScrollArea className="h-[calc(100vh-200px)]">
