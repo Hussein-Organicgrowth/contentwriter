@@ -1,283 +1,320 @@
-import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
-import { getLanguageInstruction, getCountryContext } from "@/lib/localization";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const ai = new GoogleGenAI({
+  apiKey: process.env.GOOGLE_API_KEY || "",
 });
 
-async function generateSection(
-  openai: OpenAI,
-  keyword: string,
-  title: string,
-  section: string,
-  relatedKeywords: string[],
-  previousContent: string = "",
-  language: string = "en-US",
-  targetCountry: string = "US",
-  context: string = "",
-  companyInfo: {
-    name: string;
-    website: string;
-    description: string;
-    summary: string;
-    toneofvoice: string;
-    targetAudience: string;
-  },
-  targetWordCount: number = 1000,
-  sectionIndex: number = 0,
-  totalSections: number = 5
-) {
-  // Calculate words per section based on total word count and number of sections
-  const wordsPerSection = Math.round(targetWordCount / totalSections);
+type ContentOperationType = "add" | "update" | "delete" | "expand";
 
-  const additionalContext = context
-    ? `Additional Context from the user:\n${context}\nPlease consider this context while writing the content.\n\n`
-    : "";
+interface ContentOperation {
+  type: ContentOperationType;
+  content: string;
+  context?: string;
+  targetSection?: string;
+}
 
-  const contextPrompt = previousContent
-    ? `Here's what we've written so far (don't repeat this):\n${previousContent}\n\n`
-    : "";
+interface PlacementResponse {
+  position: "before" | "after" | "replace";
+  target: string;
+  explanation: string;
+}
 
-  const companyContext = `
-You work for the company ${companyInfo.name}, and you are writing content for their website.
-Quick brief about ${companyInfo.name}:
-- They help: ${companyInfo.targetAudience}
-- Their style: ${companyInfo.toneofvoice}
-- Their story: ${companyInfo.summary}
+function cleanJsonResponse(text: string): string {
+  // Remove any markdown code block syntax
+  text = text.replace(/```json\n?/g, "").replace(/```\n?/g, "");
+  // Remove any leading/trailing whitespace
+  text = text.trim();
+  return text;
+}
 
-Make sure to use we, our, us, etc. instead of they, them, their, etc. Or company does this etc.
-`;
+// Helper function to find and replace section content
+function replaceSectionContent(
+  content: string,
+  targetSection: string,
+  newContent: string
+): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(content, "text/html");
 
-  const languageInstruction = getLanguageInstruction(language);
-  const countryContext = getCountryContext(targetCountry);
+  // Find the target section
+  const elements = doc.querySelectorAll("h1, h2, h3, h4, h5, h6, p");
+  let targetElement: Element | null = null;
 
-  const completion = await openai.chat.completions.create({
-    model: "o3-mini-2025-01-31",
-    messages: [
-      {
-        role: "developer",
-        content: `You are an expert content writer specializing in creating engaging, conversational content that connects with readers.
+  for (let i = 0; i < elements.length; i++) {
+    const element = elements[i];
+    if (element.textContent?.trim() === targetSection.trim()) {
+      targetElement = element;
+      break;
+    }
+  }
 
-Primary Objectives:
-1. Write in ${companyInfo.toneofvoice}
-2. Connect naturally with ${companyInfo.targetAudience}
-3. Embody ${companyInfo.name}'s authentic voice
-4. ${languageInstruction}
-5. ${countryContext}
-6. Write approximately ${wordsPerSection} words for this section
+  if (!targetElement) {
+    console.log("Target section not found, appending to end");
+    // If section not found, append to the end
+    const body = doc.querySelector("body");
+    if (body) {
+      const newSection = doc.createElement("div");
+      newSection.innerHTML = newContent;
+      body.appendChild(newSection);
+    }
+    return doc.body.innerHTML;
+  }
 
-Writing Approach:
-- Create flowing, narrative-style content that tells a story
-- Focus on conversational, engaging explanations
-- Use natural transitions between ideas
-- Write as if having a one-on-one conversation with the reader
-- Incorporate examples and scenarios organically
-- Keep the tone professional but warm and approachable
-- Be concise and stay within the word limit
-- Focus on quality over quantity
+  // Find the next heading or end of document
+  let nextHeading: Element | null = null;
+  let currentElement = targetElement.nextElementSibling;
 
-SEO & Structure:
-- Naturally weave in key terms without forcing them
-- Use short, focused paragraphs for readability
-- Break up long explanations with relevant examples
-- Only use lists when they truly enhance understanding
-- Keep paragraphs focused and concise
+  while (currentElement) {
+    if (currentElement.tagName.match(/^H[1-6]$/)) {
+      nextHeading = currentElement;
+      break;
+    }
+    currentElement = currentElement.nextElementSibling;
+  }
 
-${additionalContext}`,
-      },
-      {
-        role: "user",
-        content: `Write a natural, flowing section about "${section}" within "${keyword}".
-Target word count for this section: ${wordsPerSection} words
+  // Create a new div for the expanded content
+  const newSection = doc.createElement("div");
+  newSection.innerHTML = newContent;
 
-Context & Voice:
-${companyContext}
+  // Insert the new content
+  if (nextHeading) {
+    targetElement.parentNode?.insertBefore(newSection, nextHeading);
+  } else {
+    targetElement.parentNode?.appendChild(newSection);
+  }
 
-Content Direction:
-- Write conversationally, as if explaining to someone in person
-- Focus on clear explanations with real-world examples
-- Address the reader's needs and questions naturally
-- Maintain a smooth flow between ideas
-- Keep paragraphs focused but conversational (2-4 sentences)
-- Stay within the target word count of ${wordsPerSection} words
-- Be concise and avoid unnecessary elaboration
-
-Previous Content (for context):
-${contextPrompt}
-
-Related Topics (to weave in naturally):
-${relatedKeywords.join(", ")}
-
-Formatting:
-- Use <p> tags for natural paragraph breaks
-- Use <strong> sparingly for truly important points
-- Only use <ul> lists if absolutely necessary for clarity
-- Tables if needed 
-- Avoid excessive formatting - let the content flow naturally
-- NO headings or titles
-
-Remember: Write authentically as ${
-          companyInfo.name
-        }, using "we" and "our" in a natural way.`,
-      },
-    ],
-    stream: true,
-  });
-
-  return completion;
+  return doc.body.innerHTML;
 }
 
 export async function POST(req: Request) {
   try {
-    const {
-      keyword,
-      title,
-      outline,
-      relatedKeywords,
-      language = "en-US",
-      targetCountry = "US",
-      companyInfo,
-      targetWordCount = 1000,
-    } = await req.json();
+    const { operation, currentContent } = await req.json();
+    console.log("Received request:", { operation, currentContent });
 
-    console.log("Received outline:", JSON.stringify(outline, null, 2));
+    if (!operation || !currentContent) {
+      return NextResponse.json(
+        { error: "Operation and current content are required" },
+        { status: 400 }
+      );
+    }
 
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          let fullContent = "";
-          const processedSections = new Set();
-          const totalSections = outline.length;
+    // For expand operations, we don't need placement analysis
+    if (operation.type === "expand") {
+      const contentPrompt = `You are a content expander. Given the following section and context, expand it while maintaining its style and meaning.
 
-          const normalizeTitle = (title: string) => title.toLowerCase().trim();
+Section to Expand:
+${operation.targetSection}
 
-          const titleContent = `<h1>${title}</h1>\n\n`;
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                content: titleContent,
-              })}\n\n`
-            )
-          );
-          fullContent += titleContent;
+Context:
+${operation.context || "No specific context provided"}
 
-          for (let i = 0; i < outline.length; i++) {
-            const section = outline[i];
-            const normalizedTitle = normalizeTitle(section.content);
+User Request:
+${operation.content}
 
-            if (processedSections.has(normalizedTitle)) {
-              console.log(`Skipping duplicate section: ${section.content}`);
-              continue;
-            }
+Generate an expanded version of the section that:
+1. Maintains the original meaning and style
+2. Adds more detail and depth
+3. Keeps the same structure and formatting
+4. Is 2-3 times longer than the original
+5. Preserves any existing HTML formatting
 
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  section: section.content,
-                  isProgress: true,
-                })}\n\n`
-              )
-            );
+Return only the expanded content, without any additional formatting or explanations.`;
 
-            const completion = await generateSection(
-              openai,
-              keyword,
-              title,
-              section.content,
-              relatedKeywords,
-              fullContent,
-              language,
-              targetCountry,
-              section.context || "",
-              companyInfo,
-              targetWordCount,
-              i,
-              totalSections
-            );
+      console.log("Sending content prompt:", contentPrompt);
+      const contentResponse = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: contentPrompt,
+      });
 
-            const headingLevel = section.level;
-            const sectionHeader = `\n<${headingLevel}>${section.content}</${headingLevel}>\n`;
+      if (!contentResponse.text) {
+        throw new Error("Failed to generate content");
+      }
 
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  content: sectionHeader,
-                })}\n\n`
-              )
-            );
-            fullContent += sectionHeader;
+      console.log("Content response:", contentResponse.text);
+      const generatedContent = contentResponse.text;
 
-            let isFirstChunk = true;
-            for await (const chunk of completion) {
-              const content = chunk.choices[0]?.delta?.content || "";
-              if (content) {
-                if (isFirstChunk) {
-                  const headingPattern = new RegExp(
-                    `<h[1-6]>${section.content}</h[1-6]>`,
-                    "gi"
-                  );
-                  const cleanedContent = content.replace(headingPattern, "");
-                  if (cleanedContent) {
-                    controller.enqueue(
-                      encoder.encode(
-                        `data: ${JSON.stringify({
-                          content: cleanedContent,
-                        })}\n\n`
-                      )
-                    );
-                    fullContent += cleanedContent;
-                  }
-                  isFirstChunk = false;
-                } else {
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({
-                        content: content,
-                      })}\n\n`
-                    )
-                  );
-                  fullContent += content;
-                }
-              }
-            }
+      // Replace the section content
+      const processedContent = replaceSectionContent(
+        currentContent,
+        operation.targetSection,
+        generatedContent
+      );
 
-            processedSections.add(normalizedTitle);
-            console.log(
-              "Updated processed sections:",
-              Array.from(processedSections)
-            );
-          }
+      return NextResponse.json({
+        content: processedContent,
+        placement: {
+          position: "replace",
+          target: operation.targetSection,
+          explanation: "Expanded existing section",
+        },
+        operationType: operation.type,
+      });
+    }
 
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                done: true,
-              })}\n\n`
-            )
-          );
-        } catch (error) {
-          console.error("Error in stream:", error);
-          controller.error(error);
-        } finally {
-          controller.close();
-        }
-      },
+    // For other operations, use the existing placement analysis
+    const placementPrompt = `You are a content placement analyzer. Given the following content and operation, determine where the content should be placed or updated.
+
+Current Content:
+${currentContent}
+
+Requested Operation:
+${JSON.stringify(operation)}
+
+Return ONLY a JSON object with this exact structure:
+{
+  "position": "before" | "after" | "replace",
+  "target": "section identifier or text to replace",
+  "explanation": "brief explanation of the placement decision"
+}
+
+Do not include any markdown formatting or additional text. Return only the JSON object.`;
+
+    console.log("Sending placement prompt:", placementPrompt);
+    const placementResponse = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: placementPrompt,
     });
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
+    if (!placementResponse.text) {
+      throw new Error("Failed to get placement response");
+    }
+
+    console.log("Placement response:", placementResponse.text);
+
+    // Clean and parse the JSON response
+    const cleanedJson = cleanJsonResponse(placementResponse.text);
+    console.log("Cleaned JSON:", cleanedJson);
+
+    let placement: PlacementResponse;
+    try {
+      placement = JSON.parse(cleanedJson);
+      console.log("Parsed placement:", placement);
+    } catch (error) {
+      console.error("Failed to parse placement response:", cleanedJson);
+      throw new Error("Invalid placement response format");
+    }
+
+    // Validate the placement response
+    if (!placement.position || !placement.target || !placement.explanation) {
+      throw new Error("Invalid placement response structure");
+    }
+
+    // Then, generate the actual content
+    let contentPrompt = "";
+
+    if (operation.type === "add") {
+      contentPrompt = `You are a content generator. Given the following context and operation, generate appropriate content.
+
+Context:
+${operation.context || "No specific context provided"}
+
+Operation:
+${JSON.stringify(operation)}
+
+Generate well-structured, clear content that maintains the style of the existing content. Return only the content, without any additional formatting or explanations.`;
+    } else {
+      contentPrompt = `You are a content generator. Given the following context and operation, generate appropriate content.
+
+Context:
+${operation.context || "No specific context provided"}
+
+Operation:
+${JSON.stringify(operation)}
+
+Generate well-structured, clear content that maintains the style of the existing content. Return only the content, without any additional formatting or explanations.`;
+    }
+
+    console.log("Sending content prompt:", contentPrompt);
+    const contentResponse = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: contentPrompt,
     });
+
+    if (!contentResponse.text) {
+      throw new Error("Failed to generate content");
+    }
+
+    console.log("Content response:", contentResponse.text);
+    const generatedContent = contentResponse.text;
+
+    // Process the content based on the operation type
+    let processedContent = generatedContent;
+    console.log("Processing content for operation type:", operation.type);
+
+    if (operation.type === "add") {
+      processedContent = ensureHtmlStructure(processedContent);
+      console.log("Processed content after HTML structure:", processedContent);
+    } else if (operation.type === "update" || operation.type === "expand") {
+      processedContent = maintainStructure(processedContent, currentContent);
+      console.log(
+        "Processed content after structure maintenance:",
+        processedContent
+      );
+    } else if (operation.type === "delete") {
+      processedContent = removeTargetContent(currentContent, placement.target);
+      console.log("Processed content after removal:", processedContent);
+    }
+
+    const response = {
+      content: processedContent,
+      placement,
+      operationType: operation.type,
+    };
+
+    console.log("Final response:", response);
+    return NextResponse.json(response);
   } catch (error) {
-    console.error("Error in POST:", error);
+    console.error("Error processing content operation:", error);
     return NextResponse.json(
-      { error: "Failed to generate content" },
+      {
+        error: "Failed to process content operation",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 }
     );
   }
+}
+
+// Helper function to ensure proper HTML structure
+function ensureHtmlStructure(content: string): string {
+  // Add basic HTML structure if missing
+  if (!content.includes("<p>") && !content.includes("<h")) {
+    return `<p>${content}</p>`;
+  }
+  return content;
+}
+
+// Helper function to maintain existing structure
+function maintainStructure(
+  newContent: string,
+  existingContent: string
+): string {
+  // Extract the structure from existing content
+  const parser = new DOMParser();
+  const existingDoc = parser.parseFromString(existingContent, "text/html");
+  const newDoc = parser.parseFromString(newContent, "text/html");
+
+  // Copy relevant structure from existing content
+  const existingStructure = existingDoc.querySelector("body")?.innerHTML || "";
+  const newStructure = newDoc.querySelector("body")?.innerHTML || "";
+
+  // Merge structures while maintaining the new content
+  return existingStructure.replace(/<p>.*?<\/p>/g, newStructure);
+}
+
+// Helper function to remove target content
+function removeTargetContent(content: string, target: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(content, "text/html");
+
+  // Find and remove the target element
+  const elements = doc.querySelectorAll("h1, h2, h3, h4, h5, h6, p");
+  elements.forEach((element) => {
+    if (element.textContent?.includes(target)) {
+      element.remove();
+    }
+  });
+
+  return doc.body.innerHTML;
 }

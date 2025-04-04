@@ -942,29 +942,7 @@ export default function ProductsPage() {
 
       console.log("Publishing product:", product.id);
 
-      // Store the current Shopify description in the pending description
-      const updatedPendingResponse = await fetch(
-        "/api/platform/shopify/pending",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            productId: String(product.id),
-            oldDescription: product.body_html || "", // Keep the current Shopify description
-            newDescription: pendingDescription.newDescription,
-            company,
-            generatedAt: pendingDescription.generatedAt,
-          }),
-        }
-      );
-
-      if (!updatedPendingResponse.ok) {
-        throw new Error("Failed to update pending description");
-      }
-
-      // Update Shopify product description
+      // Update Shopify product description first
       const updateResponse = await fetch("/api/platform/shopify/update", {
         method: "POST",
         headers: {
@@ -983,7 +961,6 @@ export default function ProductsPage() {
 
       // Get current timestamp
       const publishedAt = new Date().toISOString();
-      console.log("Saving published status with timestamp:", publishedAt);
 
       // Save published status to database
       const savePublishedResponse = await fetch(
@@ -1002,54 +979,51 @@ export default function ProductsPage() {
         }
       );
 
-      console.log(
-        "Save published response status:",
-        savePublishedResponse.status
-      );
-
       if (!savePublishedResponse.ok) {
         console.warn(
           "Failed to save published status to database, but product was updated"
         );
         console.error("Error response:", await savePublishedResponse.text());
-      } else {
-        console.log("Published status saved successfully");
       }
 
-      // Update local state while keeping the original description
-      const newPendingDesc = {
-        ...pendingDescription,
-        oldDescription: product.body_html || "", // Keep the current Shopify description
-      };
-
-      setPendingDescriptions({
-        ...pendingDescriptions,
-        [product.id]: newPendingDesc,
-      });
-
-      // Update products list
+      // Get the updated product data
       const { product: updatedProduct } = await updateResponse.json();
 
-      // Mark product as published and add timestamp
-      updatedProduct.isPublished = true;
-      updatedProduct.publishedAt = publishedAt;
-
-      // Update products list
-      const updatedProducts = products.map((p) =>
-        String(p.id) === String(product.id)
-          ? { ...updatedProduct, isPublished: true, publishedAt }
-          : p
+      // Update all states in a single batch
+      setProducts((prevProducts) =>
+        prevProducts.map((p) =>
+          String(p.id) === String(product.id)
+            ? {
+                ...updatedProduct,
+                isPublished: true,
+                publishedAt,
+                body_html: pendingDescription.newDescription,
+              }
+            : p
+        )
       );
-      setProducts(updatedProducts);
 
-      // Add to published products set
+      // Update published products set
       setPublishedProducts((prev) => {
         const newSet = new Set(prev);
         newSet.add(String(product.id));
         return newSet;
       });
 
-      filterProducts();
+      // Update pending descriptions
+      setPendingDescriptions((prev) => {
+        const newPending = { ...prev };
+        if (newPending[product.id]) {
+          newPending[product.id] = {
+            ...newPending[product.id],
+            oldDescription: pendingDescription.newDescription,
+          };
+        }
+        return newPending;
+      });
+
+      // Force a UI update by triggering a filter
+      setFilteredProducts((prev) => [...prev]);
 
       toast.success("Product description updated successfully");
       setIsCompareOpen(false);

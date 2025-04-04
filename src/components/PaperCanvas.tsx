@@ -30,7 +30,11 @@ import "remixicon/fonts/remixicon.css";
 import { toast } from "react-hot-toast";
 
 // Add custom extension for highlighted content
-import { Node, JSONContent } from "@tiptap/core";
+import { Node } from "@tiptap/core";
+
+// Add type imports
+import { Node as ProsemirrorNode } from "@tiptap/pm/model";
+import { JSONContent } from "@tiptap/react";
 
 const HighlightedContent = Node.create({
   name: "highlightedContent",
@@ -139,7 +143,7 @@ interface Message {
 }
 
 interface ContentUpdate {
-  type: "insert" | "modify" | "delete";
+  type: "insert" | "modify" | "delete" | "replace" | "update";
   position: "before" | "after" | "replace";
   target?: string;
   content: string;
@@ -476,14 +480,36 @@ export default function PaperCanvas({
     setIsLoading(true);
 
     try {
-      console.log("Sending request to API with content:", content);
-      const response = await fetch("/api/content/chat", {
+      const operationType = determineOperationType(userInput);
+      console.log("Determined operation type:", operationType);
+
+      // Extract target section for expand/update operations
+      let targetSection = null;
+      if (operationType === "expand" || operationType === "update") {
+        // Try to find the target section in the user's input
+        const words = userInput.split(" ");
+        for (let i = 0; i < words.length; i++) {
+          const potentialTarget = words.slice(i).join(" ");
+          targetSection = findSection(content, potentialTarget);
+          if (targetSection) break;
+        }
+      }
+
+      const operation = {
+        type: operationType,
+        content: userInput,
+        context: content,
+        targetSection: targetSection?.text || null,
+      };
+      console.log("Created operation:", operation);
+
+      const response = await fetch("/api/content", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages: [...messages, newMessage],
+          operation,
           currentContent: content,
         }),
       });
@@ -492,106 +518,223 @@ export default function PaperCanvas({
         throw new Error("Failed to process request");
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No reader available");
+      const data = await response.json();
+      console.log("Received API response:", data);
 
-      const processedUpdates = new Set<string>();
+      if (operationType === "expand" && targetSection) {
+        // For expand operations, we want to replace the entire section
+        const { content: expandedContent } = data;
+        console.log("Processing expand operation:", expandedContent);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        // Generate a unique ID for this change
+        const elementId = `change-${Date.now()}`;
 
-        const chunk = new TextDecoder().decode(value);
-        console.log("Received chunk:", chunk);
-        const lines = chunk.split("\n");
+        // Find the position of the target section in the editor
+        let targetPos = -1;
+        let endPos = -1;
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const dataStr = line.slice(5).trim();
-            if (dataStr === "[DONE]") {
-              console.log("Received [DONE] message");
-              continue;
+        editor?.state.doc.descendants((node, pos) => {
+          if (
+            node.type.name === "heading" &&
+            node.textContent?.trim() === targetSection.text.trim()
+          ) {
+            targetPos = pos;
+            // Find the end of this section (until next heading or end of document)
+            let currentPos = pos + node.nodeSize;
+            let nextNode = editor?.state.doc.nodeAt(currentPos);
+
+            while (nextNode && nextNode.type.name !== "heading") {
+              currentPos += nextNode.nodeSize;
+              nextNode = editor?.state.doc.nodeAt(currentPos);
             }
-
-            try {
-              const data = JSON.parse(dataStr);
-              console.log("Parsed data:", data);
-
-              if (data.type === "content") {
-                const updateKey = `${data.update.type}-${data.update.target}-${data.update.content}`;
-                if (processedUpdates.has(updateKey)) {
-                  console.log("Skipping duplicate update");
-                  continue;
-                }
-                processedUpdates.add(updateKey);
-
-                const update: ContentUpdate = data.update;
-                console.log("Processing content update:", update);
-
-                // Create a temporary div to parse the HTML content
-                const tempDiv = document.createElement("div");
-                tempDiv.innerHTML = update.content;
-
-                // Generate a unique ID for this change
-                const elementId = `change-${Date.now()}`;
-
-                // Create the content nodes
-                const contentNodes: JSONContent[] = [];
-                Array.from(tempDiv.children).forEach((child) => {
-                  if (child.tagName === "H2") {
-                    contentNodes.push({
-                      type: "heading",
-                      attrs: { level: 2 },
-                      content: [
-                        { type: "text", text: child.textContent || "" },
-                      ],
-                    });
-                  } else if (child.tagName === "P") {
-                    contentNodes.push({
-                      type: "paragraph",
-                      content: [
-                        { type: "text", text: child.textContent || "" },
-                      ],
-                    });
-                  }
-                });
-
-                // Insert the highlighted content
-                editor
-                  ?.chain()
-                  .focus()
-                  .insertContent({
-                    type: "highlightedContent",
-                    attrs: { "data-change-id": elementId },
-                    content: contentNodes,
-                  })
-                  .run();
-
-                // Add to pending changes
-                setPendingChanges((prev) => [
-                  ...prev,
-                  {
-                    update,
-                    content: editor?.getHTML() || "",
-                    timestamp: Date.now(),
-                    elementId,
-                  },
-                ]);
-              } else if (data.type === "message") {
-                setMessages((prev) => [
-                  ...prev.filter((m) => m.role !== "assistant"),
-                  { role: "assistant", content: data.content },
-                ]);
-              }
-            } catch (error) {
-              console.error("Failed to parse chunk:", error);
-              console.error("Problematic line:", line);
-            }
+            endPos = currentPos;
+            return false;
           }
+          return true;
+        });
+
+        if (targetPos === -1) {
+          console.error("Target section not found in editor");
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content:
+                "I couldn't find the section you wanted to expand. Please try again with the exact heading text.",
+            },
+          ]);
+          return;
         }
+
+        // Create the highlighted content with proper HTML structure
+        const parsedContent = parseHTML(expandedContent);
+
+        // Replace the content
+        editor
+          ?.chain()
+          .focus()
+          .deleteRange({ from: targetPos, to: endPos })
+          .insertContentAt(targetPos, {
+            type: "highlightedContent",
+            attrs: { "data-change-id": elementId },
+            content: parsedContent,
+          } as JSONContent)
+          .run();
+
+        const pendingChange: PendingChange = {
+          update: {
+            type: "modify",
+            position: "replace",
+            target: targetSection.text,
+            content: expandedContent,
+            explanation: "Expanded content",
+          },
+          content: editor?.getHTML() || "",
+          timestamp: Date.now(),
+          elementId,
+        };
+
+        setPendingChanges((prev) => [...prev, pendingChange]);
+      } else if (operationType === "add") {
+        const { content: newContent, placement } = data;
+        console.log("Processing add operation:", { newContent, placement });
+
+        // Generate a unique ID for this change
+        const elementId = `change-${Date.now()}`;
+
+        if (placement.position === "before" || placement.position === "after") {
+          // Extract just the text content for finding the target
+          const targetText = placement.target.replace(/<[^>]*>/g, "").trim();
+          const targetSection = findSection(content, targetText);
+          console.log("Found target section:", targetSection);
+
+          if (targetSection) {
+            // Create the highlighted content with proper HTML structure
+            const parsedContent = parseHTML(newContent);
+            editor
+              ?.chain()
+              .focus()
+              .insertContent({
+                type: "highlightedContent",
+                attrs: { "data-change-id": elementId },
+                content: parsedContent,
+              } as JSONContent)
+              .run();
+
+            // Add to pending changes
+            const pendingChange: PendingChange = {
+              update: {
+                type: "insert",
+                position: placement.position,
+                target: targetText,
+                content: newContent,
+                explanation: placement.explanation,
+              },
+              content: editor?.getHTML() || "",
+              timestamp: Date.now(),
+              elementId,
+            };
+
+            setPendingChanges((prev) => [...prev, pendingChange]);
+          } else {
+            console.error("Target section not found");
+            // If target not found, append at the end with highlighting
+            const parsedContent = parseHTML(newContent);
+            editor
+              ?.chain()
+              .focus()
+              .insertContent({
+                type: "highlightedContent",
+                attrs: { "data-change-id": elementId },
+                content: parsedContent,
+              } as JSONContent)
+              .run();
+
+            const pendingChange: PendingChange = {
+              update: {
+                type: "insert",
+                position: "after",
+                content: newContent,
+                explanation: "Added at the end of the document",
+              },
+              content: editor?.getHTML() || "",
+              timestamp: Date.now(),
+              elementId,
+            };
+
+            setPendingChanges((prev) => [...prev, pendingChange]);
+          }
+        } else if (placement.position === "replace") {
+          // Create the highlighted content for replacement with proper HTML structure
+          const parsedContent = parseHTML(newContent);
+          editor
+            ?.chain()
+            .focus()
+            .insertContent({
+              type: "highlightedContent",
+              attrs: { "data-change-id": elementId },
+              content: parsedContent,
+            } as JSONContent)
+            .run();
+
+          const pendingChange: PendingChange = {
+            update: {
+              type: "modify",
+              position: "replace",
+              target: placement.target,
+              content: newContent,
+              explanation: placement.explanation,
+            },
+            content: editor?.getHTML() || "",
+            timestamp: Date.now(),
+            elementId,
+          };
+
+          setPendingChanges((prev) => [...prev, pendingChange]);
+        }
+      } else if (operationType === "update") {
+        const { content: updatedContent } = data;
+        console.log("Processing update operation:", updatedContent);
+
+        // Generate a unique ID for this change
+        const elementId = `change-${Date.now()}`;
+
+        // Create the highlighted content with proper HTML structure
+        const parsedContent = parseHTML(updatedContent);
+        editor
+          ?.chain()
+          .focus()
+          .insertContent({
+            type: "highlightedContent",
+            attrs: { "data-change-id": elementId },
+            content: parsedContent,
+          } as JSONContent)
+          .run();
+
+        const pendingChange: PendingChange = {
+          update: {
+            type: "modify",
+            position: "replace",
+            content: updatedContent,
+            explanation: "Updated content",
+          },
+          content: editor?.getHTML() || "",
+          timestamp: Date.now(),
+          elementId,
+        };
+
+        setPendingChanges((prev) => [...prev, pendingChange]);
       }
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "I've updated the content as requested.",
+        },
+      ]);
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Error in handleSubmit:", error);
       setMessages((prev) => [
         ...prev,
         {
@@ -602,6 +745,127 @@ export default function PaperCanvas({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Helper function to determine the type of operation
+  const determineOperationType = (
+    input: string
+  ): "add" | "update" | "delete" | "expand" => {
+    const lowerInput = input.toLowerCase();
+
+    if (
+      lowerInput.includes("expand") ||
+      lowerInput.includes("make longer") ||
+      lowerInput.includes("elaborate")
+    ) {
+      return "expand";
+    }
+    if (lowerInput.includes("add") || lowerInput.includes("insert")) {
+      return "add";
+    }
+    if (lowerInput.includes("update") || lowerInput.includes("modify")) {
+      return "update";
+    }
+    if (lowerInput.includes("delete") || lowerInput.includes("remove")) {
+      return "delete";
+    }
+    return "add"; // Default to add if no clear operation type
+  };
+
+  // Helper function to find a section in the content
+  const findSection = (
+    content: string,
+    target: string
+  ): { text: string; position: number } | null => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(content, "text/html");
+    const elements = doc.body.getElementsByTagName("*");
+
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i];
+      const text = element.textContent?.trim() || "";
+      if (text.toLowerCase().includes(target.toLowerCase())) {
+        return {
+          text: element.outerHTML,
+          position: i,
+        };
+      }
+    }
+    return null;
+  };
+
+  // Helper function to parse HTML into Tiptap JSON structure
+  const parseHTML = (html: string): JSONContent[] => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const content: JSONContent[] = [];
+
+    // Process each child node
+    doc.body.childNodes.forEach((node) => {
+      if (node.nodeType === 1) {
+        // 1 is ELEMENT_NODE
+        const element = node as Element;
+        const tagName = element.tagName.toLowerCase();
+
+        // Handle different HTML elements
+        switch (tagName) {
+          case "h1":
+          case "h2":
+          case "h3":
+          case "h4":
+          case "h5":
+          case "h6":
+            content.push({
+              type: "heading",
+              attrs: { level: parseInt(tagName.charAt(1)) },
+              content: [{ type: "text", text: element.textContent || "" }],
+            });
+            break;
+          case "p":
+            content.push({
+              type: "paragraph",
+              content: [{ type: "text", text: element.textContent || "" }],
+            });
+            break;
+          case "ul":
+            content.push({
+              type: "bulletList",
+              content: Array.from(element.children).map((li) => ({
+                type: "listItem",
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [{ type: "text", text: li.textContent || "" }],
+                  },
+                ],
+              })),
+            });
+            break;
+          case "ol":
+            content.push({
+              type: "orderedList",
+              content: Array.from(element.children).map((li) => ({
+                type: "listItem",
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [{ type: "text", text: li.textContent || "" }],
+                  },
+                ],
+              })),
+            });
+            break;
+          default:
+            // Default to paragraph for unknown elements
+            content.push({
+              type: "paragraph",
+              content: [{ type: "text", text: element.textContent || "" }],
+            });
+        }
+      }
+    });
+
+    return content;
   };
 
   // Update the addDebugHighlight function
