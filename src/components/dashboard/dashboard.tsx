@@ -193,7 +193,9 @@ export default function Dashboard({
 							<Globe className="h-full w-full fallback-icon hidden absolute" />
 						</div>
 						<div className="space-y-1 flex-1">
-							<CardTitle className={isSelected ? "text-blue-700" : ""}>
+							<CardTitle 
+								className={isSelected ? "text-primary" : ""}
+							>
 								{website.name}
 							</CardTitle>
 							<CardDescription>{website.website}</CardDescription>
@@ -375,11 +377,8 @@ export default function Dashboard({
 					</CardHeader>
 					<CardContent>
 						<div
-							className={`text-sm leading-relaxed rounded-lg p-3 min-h-[80px] flex items-center ${
-								isSelected
-									? "bg-white text-blue-700"
-									: "bg-muted/30 text-muted-foreground/80"
-							}`}>
+							className={`text-sm leading-relaxed rounded-lg p-3 min-h-[80px] flex items-center `}
+							>
 							<p className="line-clamp-3">
 								{website.description ||
 									"View existing content or create new content for your company"}
@@ -389,7 +388,7 @@ export default function Dashboard({
 					<CardFooter className={`flex gap-2 ${isSelected ? "pt-3" : ""}`}>
 						<Button
 							className="w-full"
-							variant={isSelected ? "default" : "outline"}
+							variant={isSelected ? "outline" : "outline"}
 							onClick={() => {
 								handleCompanySelect(website);
 							}}

@@ -105,7 +105,7 @@ export function Sidebar() {
 
       {/* Sidebar */}
       <div
-        className={`fixed top-0 left-0 h-screen w-64 bg-white border-r border-gray-200 z-40 transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 left-0 h-screen overflow-y-scroll w-64 bg-gray-50 border-r border-gray-200 z-40 transition-transform duration-300 ease-in-out lg:translate-x-0 ${
           isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
         } lg:relative lg:block`}
       >
@@ -129,10 +129,10 @@ export function Sidebar() {
               <div className="mt-3">
                 <button
                   onClick={handleDashboardClick}
-                  className={`flex items-center space-x-3 p-2 rounded-lg w-full text-left transition-colors ${
+                  className={`flex items-center space-x-3 p-2 rounded-lg w-full text-left transition-colors hover:bg-accent hover:text-primary ${
                     pathname === "/dashboard"
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-gray-700 hover:bg-gray-50"
+                      ? "text-primary"
+                      : "transparent"
                   }`}
                 >
                   <HomeIcon className="w-5 h-5" />
@@ -147,8 +147,8 @@ export function Sidebar() {
                   <h2 className="text-sm font-semibold text-gray-500">
                     Aktuel Virksomhed
                   </h2>
-                  <div className="mt-2 p-3 bg-blue-50 rounded-lg">
-                    <p className="text-blue-700 font-medium">{companyName}</p>
+                  <div className="mt-2 p-3 bg-accent rounded-lg">
+                    <p className="text-primary font-sm">{companyName}</p>
                   </div>
                 </div>
 
@@ -159,10 +159,10 @@ export function Sidebar() {
                   <div className="mt-3 space-y-3">
                     <Link
                       href="/dashboard/viewcontent"
-                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors ${
+                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors hover:bg-accent hover:text-primary ${
                         pathname === "/dashboard/viewcontent"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-gray-700 hover:bg-gray-50"
+                          ? "text-primary"
+                          : "transparent"
                       }`}
                     >
                       <ViewColumnsIcon className="w-5 h-5" />
@@ -170,10 +170,10 @@ export function Sidebar() {
                     </Link>
                     <Link
                       href="/content/singlecontent"
-                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors ${
+                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors hover:bg-accent hover:text-primary ${
                         pathname === "/content/singlecontent"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-gray-700 hover:bg-gray-50"
+                          ? "text-primary"
+                          : "transparent"
                       }`}
                     >
                       <DocumentPlusIcon className="w-5 h-5" />
@@ -181,10 +181,10 @@ export function Sidebar() {
                     </Link>
                     <Link
                       href="/content/bulkcontent"
-                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors ${
+                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors hover:bg-accent hover:text-primary ${
                         pathname === "/content/bulkcontent"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-gray-700 hover:bg-gray-50"
+                          ? "text-primary"
+                          : "transparent"
                       }`}
                     >
                       <DocumentDuplicateIcon className="w-5 h-5" />
@@ -192,10 +192,10 @@ export function Sidebar() {
                     </Link>
                     <Link
                       href="/dashboard/webshop"
-                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors ${
+                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors hover:bg-accent hover:text-primary ${
                         pathname === "/dashboard/webshop"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-gray-700 hover:bg-gray-50"
+                          ? "text-primary"
+                          : "transparent"
                       }`}
                     >
                       <ShoppingBagIcon className="w-5 h-5" />
@@ -211,10 +211,10 @@ export function Sidebar() {
                   <div className="mt-3 space-y-3">
                     <Link
                       href="/dashboard/settings"
-                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors ${
+                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors hover:bg-accent hover:text-primary ${
                         pathname === "/dashboard/settings"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-gray-700 hover:bg-gray-50"
+                          ? "text-primary"
+                          : "transparent"
                       }`}
                     >
                       <Cog6ToothIcon className="w-5 h-5" />
@@ -223,10 +223,10 @@ export function Sidebar() {
 
                     <Link
                       href="/dashboard/settings/workflow"
-                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors ${
+                      className={`flex items-center space-x-3 p-2 rounded-lg transition-colors hover:bg-accent hover:text-primary ${
                         pathname === "/dashboard/settings/workflow"
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-gray-700 hover:bg-gray-50"
+                          ? "text-primary"
+                          : "transparent"
                       }`}
                     >
                       <ArrowsUpDownIcon className="w-5 h-5" />
@@ -236,8 +236,8 @@ export function Sidebar() {
                 </div>
               </>
             ) : (
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-700">
+              <div className="p-4 bg-purple-50 rounded-lg">
+                <p className="text-sm text-purple-700">
                   Vælg venligst en virksomhed fra dashboardet for at få adgang
                   til indholdsgenereringsfunktioner.
                 </p>
