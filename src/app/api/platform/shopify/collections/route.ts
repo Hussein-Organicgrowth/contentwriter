@@ -15,10 +15,127 @@ interface ShopifyCollection {
   collection_type: string;
   published_scope: string;
   admin_graphql_api_id: string;
+  rules?: Array<{
+    column: string;
+    condition: string;
+    relation: string;
+  }>;
 }
 
 interface ShopifyCollectionCount {
   count: number;
+}
+
+const MAX_RETRIES = 3;
+const RATE_LIMIT_DELAY = 1000; // 1 second
+const BATCH_SIZE = 250;
+
+async function fetchWithRetry(
+  url: string,
+  accessToken: string,
+  retryCount = 0
+): Promise<Response> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      const rateLimit = response.headers.get("X-Shopify-Shop-Api-Call-Limit");
+      const retryAfter = response.headers.get("Retry-After");
+
+      console.error("Shopify API error:", {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+        url,
+        rateLimit,
+        retryAfter,
+      });
+
+      if (response.status === 429 && retryCount < MAX_RETRIES) {
+        const delay = retryAfter
+          ? parseInt(retryAfter) * 1000
+          : RATE_LIMIT_DELAY;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return fetchWithRetry(url, accessToken, retryCount + 1);
+      }
+
+      throw new Error(`Failed to fetch from Shopify: ${errorText}`);
+    }
+
+    return response;
+  } catch (error) {
+    if (retryCount < MAX_RETRIES) {
+      await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY));
+      return fetchWithRetry(url, accessToken, retryCount + 1);
+    }
+    throw error;
+  }
+}
+
+async function fetchCollectionsByType(
+  storeName: string,
+  accessToken: string,
+  type: "custom" | "smart"
+): Promise<ShopifyCollection[]> {
+  const collections: ShopifyCollection[] = [];
+  let hasNextPage = true;
+  let nextPageUrl = `https://${storeName}/admin/api/2024-01/${type}_collections.json?limit=${BATCH_SIZE}`;
+  let pageCount = 0;
+
+  while (hasNextPage) {
+    pageCount++;
+    console.log(`Fetching ${type} collections page ${pageCount}...`);
+
+    const shopifyResponse = await fetchWithRetry(nextPageUrl, accessToken);
+    const responseData = await shopifyResponse.json();
+
+    const collectionKey = `${type}_collections`;
+    if (!responseData[collectionKey]) {
+      console.error("Unexpected response format:", responseData);
+      throw new Error(
+        `Unexpected response format from Shopify API for ${type} collections`
+      );
+    }
+
+    const currentBatch = responseData[collectionKey];
+    collections.push(...currentBatch);
+
+    // Log progress
+    console.log(`Progress for ${type} collections:`, {
+      page: pageCount,
+      collectionsReceived: currentBatch.length,
+      totalCollectionsFetched: collections.length,
+      rateLimit: shopifyResponse.headers.get("X-Shopify-Shop-Api-Call-Limit"),
+    });
+
+    // Check for next page
+    const linkHeader = shopifyResponse.headers.get("Link");
+    if (linkHeader && linkHeader.includes('rel="next"')) {
+      const nextLink = linkHeader
+        .split(",")
+        .find((link) => link.includes('rel="next"'));
+      if (nextLink) {
+        nextPageUrl = nextLink.split(";")[0].trim().slice(1, -1);
+      } else {
+        hasNextPage = false;
+      }
+    } else {
+      hasNextPage = false;
+    }
+
+    // Add a small delay between requests
+    if (hasNextPage) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  return collections;
 }
 
 export async function GET(req: Request) {
@@ -35,7 +152,6 @@ export async function GET(req: Request) {
 
     await connectToDatabase();
 
-    // Get the website document to access Shopify credentials
     const website = await Website.findOne({ name: company });
     if (!website) {
       return NextResponse.json({ error: "Website not found" }, { status: 404 });
@@ -53,107 +169,45 @@ export async function GET(req: Request) {
     }
 
     const { storeName, accessToken } = shopifyIntegration.credentials;
-
-    // Ensure storeName is properly formatted
     const formattedStoreName = storeName.includes(".myshopify.com")
       ? storeName
       : `${storeName}.myshopify.com`;
 
-    // First, get the total count of collections
-    const countResponse = await fetch(
-      `https://${formattedStoreName}/admin/api/2024-01/custom_collections/count.json`,
-      {
-        headers: {
-          "X-Shopify-Access-Token": accessToken,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    // Get total counts for both types
+    const [customCountResponse, smartCountResponse] = await Promise.all([
+      fetchWithRetry(
+        `https://${formattedStoreName}/admin/api/2024-01/custom_collections/count.json`,
+        accessToken
+      ),
+      fetchWithRetry(
+        `https://${formattedStoreName}/admin/api/2024-01/smart_collections/count.json`,
+        accessToken
+      ),
+    ]);
 
-    if (!countResponse.ok) {
-      throw new Error("Failed to fetch collection count");
-    }
+    const [customCount, smartCount] = await Promise.all([
+      customCountResponse.json() as Promise<ShopifyCollectionCount>,
+      smartCountResponse.json() as Promise<ShopifyCollectionCount>,
+    ]);
 
-    const { count: totalCollections } =
-      (await countResponse.json()) as ShopifyCollectionCount;
-    console.log("Total collections in store:", totalCollections);
+    const totalCollections = customCount.count + smartCount.count;
+    console.log("Total collections in store:", {
+      custom: customCount.count,
+      smart: smartCount.count,
+      total: totalCollections,
+    });
 
-    // Call Shopify API to get collections with pagination
-    let allCollections: ShopifyCollection[] = [];
-    let hasNextPage = true;
-    let nextPageUrl = `https://${formattedStoreName}/admin/api/2024-01/custom_collections.json?limit=250`;
-    let pageCount = 0;
+    // Fetch both types of collections
+    const [customCollections, smartCollections] = await Promise.all([
+      fetchCollectionsByType(formattedStoreName, accessToken, "custom"),
+      fetchCollectionsByType(formattedStoreName, accessToken, "smart"),
+    ]);
 
-    while (hasNextPage) {
-      pageCount++;
-      console.log(`Fetching page ${pageCount}...`);
-
-      const shopifyResponse = await fetch(nextPageUrl, {
-        headers: {
-          "X-Shopify-Access-Token": accessToken,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!shopifyResponse.ok) {
-        const errorText = await shopifyResponse.text();
-        console.error("Shopify API error:", {
-          status: shopifyResponse.status,
-          statusText: shopifyResponse.statusText,
-          body: errorText,
-          url: nextPageUrl,
-          rateLimit: shopifyResponse.headers.get(
-            "X-Shopify-Shop-Api-Call-Limit"
-          ),
-        });
-        throw new Error(
-          `Failed to fetch collections from Shopify: ${errorText}`
-        );
-      }
-
-      const responseData = await shopifyResponse.json();
-
-      // Log progress
-      console.log("Progress:", {
-        page: pageCount,
-        collectionsReceived: responseData.custom_collections?.length || 0,
-        totalCollectionsFetched:
-          allCollections.length +
-          (responseData.custom_collections?.length || 0),
-        totalCollections,
-        rateLimit: shopifyResponse.headers.get("X-Shopify-Shop-Api-Call-Limit"),
-      });
-
-      if (!responseData.custom_collections) {
-        console.error("Unexpected response format:", responseData);
-        throw new Error("Unexpected response format from Shopify API");
-      }
-
-      allCollections = allCollections.concat(responseData.custom_collections);
-
-      // Check for next page using Link header
-      const linkHeader = shopifyResponse.headers.get("Link");
-      if (linkHeader && linkHeader.includes('rel="next"')) {
-        const nextLink = linkHeader
-          .split(",")
-          .find((link) => link.includes('rel="next"'));
-        if (nextLink) {
-          nextPageUrl = nextLink.split(";")[0].trim().slice(1, -1);
-        } else {
-          hasNextPage = false;
-        }
-      } else {
-        hasNextPage = false;
-      }
-
-      // Add a small delay between requests to respect rate limits
-      if (hasNextPage) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    }
+    const allCollections = [...customCollections, ...smartCollections];
 
     console.log("Fetching complete:", {
-      totalPagesFetched: pageCount,
+      customCollectionsFetched: customCollections.length,
+      smartCollectionsFetched: smartCollections.length,
       totalCollectionsFetched: allCollections.length,
       expectedTotal: totalCollections,
     });
@@ -164,7 +218,11 @@ export async function GET(req: Request) {
     return NextResponse.json({
       collections: allCollections,
       total: allCollections.length,
-      totalPages: pageCount,
+      expectedTotal: totalCollections,
+      breakdown: {
+        custom: customCollections.length,
+        smart: smartCollections.length,
+      },
     });
   } catch (error: unknown) {
     console.error("Error fetching Shopify collections:", error);
