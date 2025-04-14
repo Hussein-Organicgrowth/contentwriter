@@ -421,7 +421,7 @@ export default function Dashboard({
           </CardContent>
           <CardFooter className={`flex gap-2 ${isSelected ? "pt-3" : ""}`}>
             <Button
-              variant={isSelected ? "secondary" : "outline"}
+              variant={"outline"}
               className="w-full"
               onClick={() => {
                 handleCompanySelect(website);
@@ -432,7 +432,7 @@ export default function Dashboard({
             </Button>
             <Button
               className="w-full"
-              variant={isSelected ? "outline" : "secondary"}
+              variant={"ghost"}
               onClick={() => {
                 handleCompanySelect(website);
               }}
