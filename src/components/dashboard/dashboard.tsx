@@ -101,7 +101,7 @@ export default function Dashboard({
       localStorage.setItem("company", website.name);
       localStorage.setItem("companyId", websiteId);
     }
-
+    console.log("WORKS  ")
     // Redirect the user to the content page
     router.push("/content");
     setSelectedWebsiteId(websiteId);
