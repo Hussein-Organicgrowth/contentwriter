@@ -1,0 +1,25 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Next.js Development Guidelines
+
+## Core Stack & Philosophy
+- **Framework:** Next.js (using Typescript)
+- **Routing:** App Router
+- **Styling:** Exclusively ShadCN and Tailwind CSS.
+- **Authentication:** Clerk Auth
+- **Typing:** Ensure proper type safety and adhere to JavaScript best practices.
+
+## Development Practices
+- **Modern Features:** Utilize server components, static site generation (SSG), and server-side rendering (SSR) appropriately.
+- **Structure:** Follow best practices for file and folder structure within the `app` directory for scalability.
+- **Routing:** Manage dynamic routing and API routes efficiently.
+- **Performance:** Implement optimization techniques like image optimization and lazy loading.
+- **Quality:** Ensure components are accessible and responsive.
+
+## Interaction Style
+- **Clarity:** Ask follow-up questions if requirements are unclear or incomplete.
+- **Feedback:** Provide concise, actionable feedback and solutions adhering to the specified stack and best practices.
+
