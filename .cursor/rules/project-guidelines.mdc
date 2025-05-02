@@ -1,0 +1,25 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Project Development Guidelines
+
+Follow these guidelines when developing for this project:
+
+- **Stack**: Next.js, React, TypeScript.
+- **Architecture**: Prioritize React Server Components (RSC) and Next.js SSR features. Minimize client-side state (`'use client'`, `useEffect`, `useState`).
+- **Styling**: Use Tailwind CSS and Shadcn UI/Radix UI components for a consistent and modern UI. Follow responsive, mobile-first principles.
+- **Code Style**:
+    - Write functional, declarative TypeScript code.
+    - Use descriptive variable names (e.g., `isLoading`, `hasData`).
+    - Modularize code and avoid duplication.
+    - Structure files logically (components, helpers, types, etc.).
+    - Use lowercase-dashed directory names (e.g., `components/feature-module`).
+- **State Management**: Use Zustand or TanStack React Query for global state and data fetching.
+- **Validation**: Employ Zod for schema validation.
+- **Optimization**: Implement dynamic imports, optimize images (WebP, lazy loading).
+- **Error Handling**: Use guard clauses, early returns, and custom error types.
+- **Testing**: Write unit tests with Jest and React Testing Library.
+- **Documentation**: Use JSDoc comments for functions and components.
+

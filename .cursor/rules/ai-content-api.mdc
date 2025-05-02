@@ -1,0 +1,17 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# AI Content Generation API Route
+
+This project utilizes a Next.js API route for generating content using the Google Generative AI API.
+
+- **Location**: [src/app/api/content/route.ts](mdc:src/app/api/content/route.ts)
+- **Functionality**: Handles POST requests to generate multi-section content based on keywords, outlines, and company information.
+- **AI Model**: Uses the `gemini-2.5-pro-exp-03-25` model via the `@google/generative-ai` package. See the `generateSection` function for prompt construction and generation logic.
+- **Streaming**: Implements Server-Sent Events (SSE) using `ReadableStream` to stream content back to the client progressively.
+- **Configuration**: Requires `GOOGLE_API_KEY` environment variable.
+- **Localization**: Uses helper functions `getLanguageInstruction` and `getCountryContext` from `lib/localization`.
+- **Error Handling**: Includes `try...catch` blocks for robust error handling during generation and streaming.
+
