@@ -409,7 +409,7 @@ export async function POST(req: Request) {
 		}
 
 		const completion = await openai.chat.completions.create({
-			model: "o3-mini-2025-01-31",
+			model: "gpt-4.1-mini-2025-04-14",
 			messages: [
 				{
 					role: "developer",
