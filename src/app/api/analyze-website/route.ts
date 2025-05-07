@@ -44,7 +44,7 @@ export async function POST(req: Request) {
 					content: `Please provide a concise summary of this company website content: ${text}`,
 				},
 			],
-			model: "chatgpt-4o-latest",
+			model: "gpt-4.1-mini-2025-04-14",
 		});
 
 		const summary = completion.choices[0].message.content;
