@@ -1,447 +1,816 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
-	BookOpenCheck,
-	LinkIcon,
-	FileInput,
-	Wand2,
-	AlertCircle,
-	PercentIcon,
-	InfoIcon,
-	ChevronDownIcon,
-	ChevronUpIcon,
+  AlertCircle,
+  Search,
+  FileText,
+  BarChart2,
+  Link2,
+  Lightbulb,
+  FileBarChart2,
+  Trash2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
 
 import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-	CardFooter,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import {
-	Accordion,
-	AccordionContent,
-	AccordionItem,
-	AccordionTrigger,
-} from "@/components/ui/accordion";
 import { Progress } from "@/components/ui/progress";
-
-// Type for the processed page data from API
-interface ProcessedPageItem {
-	url: string;
-	h1: string | null;
-	summary: string;
-	toneOfVoice: string;
-	status: string;
-	error?: string;
-}
-
-// Display item type (includes client-generated ID for React keys)
-interface ProcessedPageDisplayItem extends ProcessedPageItem {
-	id: string;
-}
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 
 // API Stats interface
 interface ProcessingStats {
-	total: number;
-	success: number;
-	errors: number;
-	originalUrlCount: number;
-	sampled: boolean;
+  discoveredUrlCount: number;
+  returnedUrlCount: number;
+  capped: boolean;
 }
 
 // Initial empty state
-const emptyProcessedPages: ProcessedPageDisplayItem[] = [];
+const emptyUrls: string[] = [];
 
 export default function ContentIntelligencePage() {
-	const [sitemapUrl, setSitemapUrl] = useState("");
-	const [processedPages, setProcessedPages] =
-		useState<ProcessedPageDisplayItem[]>(emptyProcessedPages);
-	const [isLoading, setIsLoading] = useState(false);
-	const [apiError, setApiError] = useState<string | null>(null);
-	const [indexingCompleted, setIndexingCompleted] = useState(false);
-	const [processingStats, setProcessingStats] =
-		useState<ProcessingStats | null>(null);
-	const [enableSampling, setEnableSampling] = useState(true);
-	const [sampleSize, setSampleSize] = useState(10); // Default 10% sampling
+  const [sitemapUrl, setSitemapUrl] = useState("");
+  const [allUrls, setAllUrls] = useState<string[]>(emptyUrls); // Stores all URLs from API
+  const [isLoading, setIsLoading] = useState(false); // General loading for sitemap indexing
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [indexingCompleted, setIndexingCompleted] = useState(false); // Tracks if an indexing operation was completed
+  const [processingStats, setProcessingStats] =
+    useState<ProcessingStats | null>(null);
 
-	const handleIndexSitemap = async () => {
-		// Reset states
-		setIsLoading(true);
-		setApiError(null);
-		setIndexingCompleted(false);
-		setProcessedPages([]);
-		setProcessingStats(null);
+  // State for Key URL Selection by AI
+  const [keyUrls, setKeyUrls] = useState<string[]>(emptyUrls);
+  const [isSelectingKeyUrls, setIsSelectingKeyUrls] = useState(false);
+  const [keyUrlSelectionError, setKeyUrlSelectionError] = useState<
+    string | null
+  >(null);
 
-		try {
-			const response = await fetch("/api/index-sitemap", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					sitemapUrl,
-					// Only include sampleSize if sampling is enabled
-					...(enableSampling && { sampleSize }),
-				}),
-			});
+  // State for Business Analysis from Key URLs
+  const [businessAnalysis, setBusinessAnalysis] = useState<string | null>(null); // Can be string or a more structured object later
+  const [isAnalyzingBusiness, setIsAnalyzingBusiness] = useState(false);
+  const [businessAnalysisError, setBusinessAnalysisError] = useState<
+    string | null
+  >(null);
+  const [businessAnalysisCompleted, setBusinessAnalysisCompleted] =
+    useState(false);
 
-			if (!response.ok) {
-				// Try to get error details from response
-				let errorDetails = "";
-				try {
-					const errorData = await response.json();
-					errorDetails = errorData.error || errorData.details || "";
-				} catch (e) {
-					// If we can't parse the JSON, just use the status text
-					errorDetails = "";
-				}
+  // State for Content Structure & Style Analysis
+  const [contentStructureAnalysis, setContentStructureAnalysis] = useState<
+    string | null
+  >(null);
+  const [isAnalyzingContentStructure, setIsAnalyzingContentStructure] =
+    useState(false);
+  const [contentStructureAnalysisError, setContentStructureAnalysisError] =
+    useState<string | null>(null);
+  const [
+    contentStructureAnalysisCompleted,
+    setContentStructureAnalysisCompleted,
+  ] = useState(false);
 
-				throw new Error(
-					`Failed to index sitemap: ${response.status} ${response.statusText} ${
-						errorDetails ? "- " + errorDetails : ""
-					}`
-				);
-			}
+  // New: Track if all analysis steps are running
+  const [isRunningFullAnalysis, setIsRunningFullAnalysis] = useState(false);
 
-			const data = await response.json();
+  // Effect to load URLs from DB on component mount or when companyId is available
+  useEffect(() => {
+    const fetchInitialUrls = async () => {
+      const companyIdFromStorage = localStorage.getItem("companyId");
+      if (!companyIdFromStorage) {
+        console.log("No companyId in localStorage, skipping initial URL load.");
+        setIsRunningFullAnalysis(false);
+        return;
+      }
 
-			// Process the data to add client-side IDs for React keys
-			const processedData: ProcessedPageDisplayItem[] = data.pages.map(
-				(item: ProcessedPageItem, index: number) => ({
-					...item,
-					id: `page-${Date.now()}-${index}`,
-					// Map API statuses to our UI statuses if needed
-					status:
-						item.status === "Processed"
-							? "Indexed"
-							: item.status === "Error fetching page" ||
-							  item.status === "Error parsing page"
-							? "Error"
-							: "Processing",
-				})
-			);
+      console.log(
+        `Fetching initial URLs for websiteId: ${companyIdFromStorage}`
+      );
+      setIsLoading(true);
+      setApiError(null);
 
-			setProcessedPages(processedData);
-			setProcessingStats(data.stats);
-			setIndexingCompleted(true);
-		} catch (error: any) {
-			console.error("Error indexing sitemap:", error);
-			setApiError(
-				error.message || "An error occurred while indexing the sitemap."
-			);
-		} finally {
-			setIsLoading(false);
-		}
-	};
+      try {
+        const response = await fetch(
+          `/api/get-sitemap-urls?websiteId=${companyIdFromStorage}`
+        );
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            `Failed to fetch saved URLs: ${response.status} ${
+              errorData.details || response.statusText
+            }`
+          );
+        }
+        const data = await response.json();
+        if (data && Array.isArray(data.urls) && data.urls.length > 0) {
+          setAllUrls(data.urls);
+          if (data.stats && typeof data.stats === "object") {
+            setProcessingStats(data.stats as ProcessingStats);
+          }
+          if (Array.isArray(data.keyUrls)) {
+            setKeyUrls(data.keyUrls);
+          }
+          if (
+            typeof data.businessAnalysis === "string" &&
+            data.businessAnalysis
+          ) {
+            setBusinessAnalysis(data.businessAnalysis);
+            setBusinessAnalysisCompleted(true);
+          }
+          if (
+            typeof data.contentStructureAnalysis === "string" &&
+            data.contentStructureAnalysis
+          ) {
+            setContentStructureAnalysis(data.contentStructureAnalysis);
+            setContentStructureAnalysisCompleted(true);
+          }
+          console.log("Successfully loaded saved URLs from DB.");
+          setIndexingCompleted(true); // Indicate that data is available (as if indexed)
+        } else {
+          console.log(
+            "No saved URLs found in DB for this websiteId or response was empty."
+          );
+          setAllUrls([]); // Ensure it's an empty array if nothing loaded
+          setProcessingStats(null);
+        }
+      } catch (error: unknown) {
+        console.error("Error fetching initial URLs:", error);
+        setApiError(
+          error instanceof Error
+            ? error.message
+            : "Could not load saved sitemap URLs."
+        );
+        setAllUrls([]); // Safety reset
+        setProcessingStats(null);
+      } finally {
+        setIsLoading(false);
+        setIsRunningFullAnalysis(false);
+      }
+    };
 
-	return (
-		<div className="min-h-screen bg-gradient-to-b from-background via-background to-secondary/10 p-4 md:p-8 lg:p-12">
-			<div className="mx-auto max-w-7xl">
-				<div className="mb-12 space-y-6">
-					<div className="text-center space-y-4">
-						<div className="inline-flex items-center gap-2 px-6 py-2 bg-primary/10 rounded-full text-primary text-sm font-medium mb-2">
-							<FileInput className="h-5 w-5" /> Sitemap Indexing
-						</div>
-						<h1 className="text-4xl font-bold tracking-tight md:text-6xl text-foreground">
-							Content Intelligence Hub
-						</h1>
-						<p className="mt-4 text-muted-foreground text-lg max-w-3xl mx-auto">
-							Provide your sitemap URL to index your website. This allows the AI
-							to gain a comprehensive understanding of your content, improving
-							the relevance and coherence of generated material.
-						</p>
-					</div>
+    fetchInitialUrls();
+  }, []); // Runs once on mount. If companyId can change and you need to re-fetch, add it to dependency array.
 
-					<Card className="max-w-2xl mx-auto shadow-md border-border/40">
-						<CardHeader>
-							<div className="flex items-center space-x-3">
-								<LinkIcon className="h-6 w-6 text-primary" />
-								<CardTitle>Index Your Website</CardTitle>
-							</div>
-							<CardDescription>
-								Enter the full URL of your sitemap.xml file.
-							</CardDescription>
-						</CardHeader>
-						<CardContent className="space-y-4">
-							<div className="flex flex-col sm:flex-row gap-2">
-								<Input
-									type="url"
-									placeholder="https://example.com/sitemap.xml"
-									value={sitemapUrl}
-									onChange={(e) => setSitemapUrl(e.target.value)}
-									className="flex-grow"
-									disabled={isLoading}
-								/>
-								<Button
-									onClick={handleIndexSitemap}
-									disabled={isLoading || !sitemapUrl}
-									className="w-full sm:w-auto">
-									<Wand2 className="mr-2 h-4 w-4" />
-									{isLoading ? "Indexing..." : "Start Indexing"}
-								</Button>
-							</div>
+  // Helper: Run all analysis steps in sequence
+  const runFullAnalysis = async () => {
+    setIsRunningFullAnalysis(true);
+    setKeyUrlSelectionError(null);
+    setBusinessAnalysisError(null);
+    setContentStructureAnalysisError(null);
+    setKeyUrls([]);
+    setBusinessAnalysis(null);
+    setBusinessAnalysisCompleted(false);
+    setContentStructureAnalysis(null);
+    setContentStructureAnalysisCompleted(false);
 
-							<Accordion
-								type="single"
-								collapsible
-								defaultValue="sampling"
-								className="w-full">
-								<AccordionItem value="sampling">
-									<AccordionTrigger className="text-sm font-medium">
-										<div className="flex items-center gap-2">
-											<PercentIcon className="h-4 w-4 text-muted-foreground" />
-											<span>
-												Sampling Settings{" "}
-												<span className="text-muted-foreground">
-													(for large sitemaps)
-												</span>
-											</span>
-										</div>
-									</AccordionTrigger>
-									<AccordionContent>
-										<div className="space-y-3 pt-2">
-											<div className="flex items-center justify-between">
-												<label className="text-sm font-medium leading-none space-x-2 flex items-center cursor-pointer">
-													<input
-														type="checkbox"
-														checked={enableSampling}
-														onChange={(e) =>
-															setEnableSampling(e.target.checked)
-														}
-														className="rounded border-gray-300"
-														disabled={isLoading}
-													/>
-													<span>Enable sampling</span>
-												</label>
-												<span className="text-sm text-muted-foreground">
-													{enableSampling ? `${sampleSize}%` : "Off"}
-												</span>
-											</div>
+    // 1. Select Key URLs
+    setIsSelectingKeyUrls(true);
+    let selectedKeyUrls: string[] = [];
 
-											{enableSampling && (
-												<div className="pt-1">
-													<Slider
-														value={[sampleSize]}
-														min={1}
-														max={100}
-														step={1}
-														disabled={isLoading || !enableSampling}
-														onValueChange={(values) => setSampleSize(values[0])}
-														className="py-2"
-													/>
-													<div className="flex justify-between text-xs text-muted-foreground">
-														<span>1%</span>
-														<span>50%</span>
-														<span>100%</span>
-													</div>
-													<p className="text-xs text-muted-foreground pt-2">
-														<InfoIcon className="h-3 w-3 inline mr-1" />
-														For very large sitemaps, sampling processes a
-														smaller representative set of pages. This
-														significantly improves processing speed.
-													</p>
-												</div>
-											)}
-										</div>
-									</AccordionContent>
-								</AccordionItem>
-							</Accordion>
+    let isBusinessAnalysisCompleted = false;
+    let isContentStructureAnalysisCompleted = false;
+    let businessAnalysis = "";
+    let contentStructureAnalysis = "";
+    try {
+      const companyIdFromStorage = localStorage.getItem("companyId");
+      if (!companyIdFromStorage)
+        throw new Error(
+          "Website ID (companyId) not found. Cannot proceed with analysis."
+        );
+      const response = await fetch("/api/ai/select-key-urls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          urls: allUrls,
+          websiteId: companyIdFromStorage,
+          model: "gpt-4.1-mini-2025-04-14",
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          `Failed to select key URLs: ${response.status} ${
+            response.statusText
+          } - ${
+            errorData.error ||
+            errorData.details ||
+            "No additional error details provided."
+          }`
+        );
+      }
+      const data = await response.json();
+      if (data && Array.isArray(data.keyUrls)) {
+        setKeyUrls(data.keyUrls);
+        selectedKeyUrls = data.keyUrls;
+      } else {
+        throw new Error(
+          "Received an unexpected response from the selection service."
+        );
+      }
+    } catch (error: unknown) {
+      setKeyUrlSelectionError(
+        error instanceof Error
+          ? error.message
+          : "An unknown error occurred during key URL selection."
+      );
+      setIsSelectingKeyUrls(false);
+      setIsRunningFullAnalysis(false);
+      return;
+    } finally {
+      setIsSelectingKeyUrls(false);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // 2. Business Analysis
+    setIsAnalyzingBusiness(true);
+    try {
+      const companyIdFromStorage = localStorage.getItem("companyId");
+      if (!companyIdFromStorage)
+        throw new Error(
+          "Website ID (companyId) not found. Cannot proceed with analysis."
+        );
+      const response = await fetch("/api/ai/analyze-business-from-urls", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyUrls: selectedKeyUrls,
+          websiteId: companyIdFromStorage,
+          model: "gpt-4.1-mini-2025-04-14",
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          `Failed to analyze business content: ${response.status} ${
+            response.statusText
+          } - ${
+            errorData.error ||
+            errorData.details ||
+            "No additional error details provided."
+          }`
+        );
+      }
+      const data = await response.json();
+      if (data && data.analysis) {
+        setBusinessAnalysis(data.analysis as string);
+        setBusinessAnalysisCompleted(true);
+        isBusinessAnalysisCompleted = true;
+        businessAnalysis = data.analysis as string;
+      } else {
+        throw new Error(
+          "Received an unexpected response from the business analysis service."
+        );
+      }
+    } catch (error: unknown) {
+      setBusinessAnalysisError(
+        error instanceof Error
+          ? error.message
+          : "An unknown error occurred during business analysis."
+      );
+      setIsAnalyzingBusiness(false);
+      setIsRunningFullAnalysis(false);
+      return;
+    } finally {
+      setIsAnalyzingBusiness(false);
+    }
 
-							{apiError && (
-								<Alert variant="destructive" className="mt-4">
-									<AlertCircle className="h-4 w-4" />
-									<AlertTitle>Error</AlertTitle>
-									<AlertDescription>{apiError}</AlertDescription>
-								</Alert>
-							)}
+    // 3. Content Structure Analysis
+    setIsAnalyzingContentStructure(true);
+    try {
+      const companyIdFromStorage = localStorage.getItem("companyId");
+      if (!companyIdFromStorage)
+        throw new Error(
+          "Website ID (companyId) not found. Cannot proceed with content structure analysis."
+        );
+      const response = await fetch("/api/ai/analyze-content-structure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyUrls: selectedKeyUrls,
+          websiteId: companyIdFromStorage,
+          model: "gpt-4.1-mini-2025-04-14",
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          `Failed to analyze content structure: ${response.status} ${
+            response.statusText
+          } - ${
+            errorData.error ||
+            errorData.details ||
+            "No additional error details provided."
+          }`
+        );
+      }
+      const data = await response.json();
+      if (data && data.analysis) {
+        setContentStructureAnalysis(data.analysis as string);
+        setContentStructureAnalysisCompleted(true);
+        isContentStructureAnalysisCompleted = true;
+        contentStructureAnalysis = data.analysis as string;
+      } else {
+        throw new Error(
+          "Received an unexpected response from the content structure analysis service."
+        );
+      }
+    } catch (error: unknown) {
+      setContentStructureAnalysisError(
+        error instanceof Error
+          ? error.message
+          : "An unknown error occurred during content structure analysis."
+      );
+      setIsAnalyzingContentStructure(false);
+      setIsRunningFullAnalysis(false);
+      return;
+    } finally {
+      setIsAnalyzingContentStructure(false);
+      setIsRunningFullAnalysis(false);
 
-							{isLoading && (
-								<div className="mt-4 space-y-2">
-									<div className="flex justify-between text-sm">
-										<span>Processing sitemap</span>
-										<span>Please wait...</span>
-									</div>
-									<Progress value={33} className="h-2" />
-									<p className="text-xs text-muted-foreground pt-1">
-										This might take several minutes for large sitemaps
-									</p>
-								</div>
-							)}
+      // After all analyses are complete, save to DB
+      if (isBusinessAnalysisCompleted && isContentStructureAnalysisCompleted) {
+        const companyIdFromStorage = localStorage.getItem("companyId");
+        if (
+          companyIdFromStorage &&
+          businessAnalysis &&
+          contentStructureAnalysis
+        ) {
+          try {
+            await fetch("/api/website/save-analysis", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                websiteId: companyIdFromStorage,
+                businessAnalysis: businessAnalysis,
+                contentStructureAnalysis: contentStructureAnalysis,
+                keyUrls: selectedKeyUrls,
+              }),
+            });
+            console.log("Analysis data saved to DB.");
+          } catch (dbError) {
+            console.error("Error saving analysis to DB:", dbError);
+            // Optionally, set an error state here to inform the user
+          }
+        }
+      }
+    }
+  };
 
-							{indexingCompleted && processingStats && (
-								<Alert className="mt-4 bg-green-500/10 text-green-700 border-green-500/30">
-									<AlertCircle className="h-4 w-4" />
-									<AlertTitle>Processing Complete</AlertTitle>
-									<AlertDescription>
-										<p className="mb-1">
-											Successfully processed {processingStats.total} URLs from
-											the sitemap.
-										</p>
-										<div className="text-xs space-y-1 mt-2">
-											<div className="flex justify-between">
-												<span>Success:</span>
-												<span>
-													{processingStats.success} (
-													{Math.round(
-														(processingStats.success / processingStats.total) *
-															100
-													)}
-													%)
-												</span>
-											</div>
-											<div className="flex justify-between">
-												<span>Errors:</span>
-												<span>
-													{processingStats.errors} (
-													{Math.round(
-														(processingStats.errors / processingStats.total) *
-															100
-													)}
-													%)
-												</span>
-											</div>
-											{processingStats.sampled && (
-												<div className="flex justify-between">
-													<span>Sampling applied:</span>
-													<span>
-														{Math.round(
-															(processingStats.total /
-																processingStats.originalUrlCount) *
-																100
-														)}
-														% of {processingStats.originalUrlCount} URLs
-													</span>
-												</div>
-											)}
-										</div>
-									</AlertDescription>
-								</Alert>
-							)}
-						</CardContent>
-					</Card>
-				</div>
+  const handleIndexSitemap = async () => {
+    // Reset states
+    setIsLoading(true);
+    setApiError(null);
+    setIndexingCompleted(false);
+    setAllUrls([]);
+    setIsRunningFullAnalysis(false);
 
-				<Card className="shadow-lg border-border/40">
-					<CardHeader>
-						<div className="flex items-center space-x-3 mb-2">
-							<BookOpenCheck className="h-8 w-8 text-primary" />
-							<CardTitle className="text-2xl">
-								Indexed Content Overview
-							</CardTitle>
-						</div>
-						<CardDescription>
-							A list of content pieces from your sitemap that the AI is using as
-							a knowledge base.
-						</CardDescription>
-					</CardHeader>
-					<CardContent>
-						{isLoading && (
-							<div className="text-center py-8 text-muted-foreground">
-								<div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
-								<p>Processing sitemap - this may take a few moments...</p>
-							</div>
-						)}
+    const companyIdFromStorage = localStorage.getItem("companyId");
 
-						{!isLoading && (
-							<div className="overflow-hidden rounded-md border">
-								<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead className="w-[25%]">URL</TableHead>
-											<TableHead className="w-[15%]">H1</TableHead>
-											<TableHead className="w-[35%]">Summary</TableHead>
-											<TableHead className="w-[15%]">Tone of Voice</TableHead>
-											<TableHead className="text-right">Status</TableHead>
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{processedPages.length > 0 ? (
-											processedPages.map((item) => (
-												<TableRow key={item.id} className="hover:bg-muted/50">
-													<TableCell>
-														<a
-															href={item.url}
-															target="_blank"
-															rel="noopener noreferrer"
-															className="text-primary hover:underline truncate max-w-[250px] block"
-															title={item.url}>
-															{item.url}
-														</a>
-													</TableCell>
-													<TableCell
-														className="font-medium truncate max-w-[150px]"
-														title={item.h1 || ""}>
-														{item.h1 || "No H1 found"}
-													</TableCell>
-													<TableCell
-														className="text-sm text-muted-foreground truncate max-w-[300px]"
-														title={item.summary}>
-														{item.summary}
-													</TableCell>
-													<TableCell>{item.toneOfVoice}</TableCell>
-													<TableCell className="text-right">
-														<Badge
-															variant={
-																item.status === "Indexed"
-																	? "default"
-																	: item.status === "Processing"
-																	? "outline"
-																	: "destructive"
-															}
-															className={
-																item.status === "Indexed"
-																	? "bg-green-500/10 text-green-700 border-green-500/30"
-																	: item.status === "Processing"
-																	? "bg-blue-500/10 text-blue-700 border-blue-500/30"
-																	: "bg-red-500/10 text-red-700 border-red-500/30"
-															}
-															title={item.error ? item.error : ""}>
-															{item.status}
-														</Badge>
-													</TableCell>
-												</TableRow>
-											))
-										) : (
-											<TableRow>
-												<TableCell
-													colSpan={5}
-													className="text-center text-muted-foreground py-8">
-													No content has been indexed yet. Enter a sitemap URL
-													to begin.
-												</TableCell>
-											</TableRow>
-										)}
-									</TableBody>
-								</Table>
-							</div>
-						)}
-					</CardContent>
-					{processedPages.length > 0 && processingStats && (
-						<CardFooter className="text-xs text-muted-foreground pt-2 pb-6">
-							{processingStats.sampled
-								? `Showing ${processedPages.length} sampled pages from a total of ${processingStats.originalUrlCount} URLs found in the sitemap.`
-								: `Showing all ${processedPages.length} pages from the sitemap.`}
-						</CardFooter>
-					)}
-				</Card>
-			</div>
-		</div>
-	);
+    if (!companyIdFromStorage) {
+      console.error("Error: companyId not found in localStorage.");
+      setApiError(
+        "Website ID (companyId) not found. Please ensure you are logged in or have a selected company."
+      );
+      setIsLoading(false);
+      return;
+    }
+
+    const websiteId = companyIdFromStorage;
+    console.log(
+      `Using websiteId (companyId from localStorage) for indexing: ${websiteId}`
+    );
+
+    try {
+      const response = await fetch("/api/index-sitemap", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sitemapUrl,
+          websiteId,
+        }),
+      });
+
+      if (!response.ok) {
+        console.log(
+          "API response on error:",
+          JSON.stringify(response, null, 2)
+        );
+        let errorDetails = "";
+        try {
+          const errorData = await response.json();
+          errorDetails = errorData.error || errorData.details || "";
+        } catch {
+          errorDetails = "";
+        }
+        throw new Error(
+          `Failed to index sitemap: ${response.status} ${response.statusText} ${
+            errorDetails ? "- " + errorDetails : ""
+          }`
+        );
+      }
+
+      const data = await response.json();
+      console.log(
+        "API response from /index-sitemap:",
+        JSON.stringify(data, null, 2)
+      );
+      try {
+        if (data && Array.isArray(data.urls)) {
+          setAllUrls(data.urls);
+        } else {
+          setAllUrls([]);
+          console.warn(
+            "API response for 'urls' from /index-sitemap was not an array or was missing. Received:",
+            data
+          );
+        }
+        if (data && typeof data.stats === "object" && data.stats !== null) {
+          setProcessingStats(data.stats as ProcessingStats);
+        } else {
+          setProcessingStats(null);
+          console.warn(
+            "API response for 'stats' from /index-sitemap was not a valid object or was missing. Received:",
+            data
+          );
+        }
+      } catch (processingError: unknown) {
+        console.error(
+          "Error processing data structure from /index-sitemap API:",
+          processingError,
+          "Original data received:",
+          data
+        );
+        setApiError(
+          processingError instanceof Error
+            ? `Error processing /index-sitemap API data: ${processingError.message}`
+            : "Error processing data received from /index-sitemap server."
+        );
+        setAllUrls([]);
+        setProcessingStats(null);
+      }
+      setIndexingCompleted(true); // Mark new indexing as complete
+    } catch (error: unknown) {
+      console.error("Error indexing sitemap:", error);
+      if (error instanceof Error) {
+        setApiError(
+          error.message || "An error occurred while indexing the sitemap."
+        );
+      } else {
+        setApiError("An unknown error occurred while indexing the sitemap.");
+      }
+      setIndexingCompleted(false); // Ensure this is false on error
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 p-4 md:p-8">
+      <div className="mx-auto max-w-7xl space-y-8">
+        {/* Header */}
+        <div className="text-center space-y-4">
+          <h1 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-700 to-purple-500">
+            Content Intelligence Hub
+          </h1>
+          <p className="text-slate-600 max-w-2xl mx-auto">
+            Provide your sitemap URL to extract all website URLs. If already
+            indexed, you can analyze your content in one click.
+          </p>
+
+          {/* URL Input */}
+          {allUrls.length === 0 && (
+            <div className="flex flex-col sm:flex-row gap-2 max-w-xl mx-auto mt-6">
+              <Input
+                placeholder="Enter your sitemap URL"
+                value={sitemapUrl}
+                onChange={(e) => setSitemapUrl(e.target.value)}
+                className="flex-1"
+                disabled={isLoading}
+              />
+              <Button
+                className="bg-purple-600 hover:bg-purple-700"
+                onClick={handleIndexSitemap}
+                disabled={isLoading || !sitemapUrl}
+              >
+                <Search className="mr-2 h-4 w-4" />
+                Extract URLs
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Main Content */}
+        {allUrls.length > 0 && (
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Extracted URLs */}
+            <Card className="shadow-md border-0">
+              <CardHeader className="pb-2 relative">
+                <div className="flex items-center gap-2">
+                  <div className="bg-purple-100 p-2 rounded-md">
+                    <FileText className="h-5 w-5 text-purple-600" />
+                  </div>
+                  <CardTitle>Extracted URLs</CardTitle>
+                  <div className="ml-auto">
+                    <HoverCard openDelay={100} closeDelay={100}>
+                      <HoverCardTrigger asChild>
+                        <button
+                          type="button"
+                          className="p-2 rounded hover:bg-red-100 text-red-600 transition-colors"
+                          aria-label="Delete Analysis Data"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const companyIdFromStorage =
+                              localStorage.getItem("companyId");
+                            if (!companyIdFromStorage) return;
+                            setIsLoading(true);
+                            setApiError(null);
+                            try {
+                              const response = await fetch(
+                                `/api/get-sitemap-urls?websiteId=${companyIdFromStorage}`,
+                                { method: "DELETE" }
+                              );
+                              if (!response.ok) {
+                                const errorData = await response
+                                  .json()
+                                  .catch(() => ({}));
+                                throw new Error(
+                                  `Failed to delete analysis data: ${
+                                    response.status
+                                  } ${errorData.details || response.statusText}`
+                                );
+                              }
+                              setKeyUrls([]);
+                              setBusinessAnalysis(null);
+                              setBusinessAnalysisCompleted(false);
+                              setContentStructureAnalysis(null);
+                              setContentStructureAnalysisCompleted(false);
+                              setAllUrls([]);
+                              setProcessingStats(null);
+                              setIndexingCompleted(false);
+                            } catch (error) {
+                              setApiError(
+                                error instanceof Error
+                                  ? error.message
+                                  : "Failed to delete analysis data."
+                              );
+                            } finally {
+                              setIsLoading(false);
+                            }
+                          }}
+                          disabled={isLoading || isRunningFullAnalysis}
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </HoverCardTrigger>
+                      <HoverCardContent className="text-sm">
+                        Delete Analysis Data
+                      </HoverCardContent>
+                    </HoverCard>
+                  </div>
+                </div>
+                <CardDescription>
+                  {allUrls.length} URLs extracted from your sitemap. Ready for
+                  analysis.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[300px] rounded-md border p-4">
+                  <div className="space-y-4">
+                    {allUrls.map((url, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className="w-6 h-6 flex items-center justify-center p-0"
+                        >
+                          {idx + 1}
+                        </Badge>
+                        <span
+                          className="text-sm text-blue-600 truncate hover:underline cursor-pointer"
+                          title={url}
+                        >
+                          {url}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+                <Button
+                  className="w-full mt-4 bg-purple-600 hover:bg-purple-700"
+                  onClick={runFullAnalysis}
+                  disabled={
+                    isRunningFullAnalysis ||
+                    isSelectingKeyUrls ||
+                    isAnalyzingBusiness ||
+                    isAnalyzingContentStructure
+                  }
+                >
+                  <BarChart2 className="mr-2 h-4 w-4" />
+                  {isRunningFullAnalysis ? "Analyzing..." : "Analyze"}
+                </Button>
+                {isLoading && (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>Extracting URLs from sitemap</span>
+                      <span>Please wait...</span>
+                    </div>
+                    <Progress value={null} className="h-2" />
+                    <p className="text-xs text-muted-foreground pt-1">
+                      This might take a moment for large sitemaps.
+                    </p>
+                  </div>
+                )}
+                {apiError && (
+                  <Alert variant="destructive" className="mt-4">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Error</AlertTitle>
+                    <AlertDescription>{apiError}</AlertDescription>
+                  </Alert>
+                )}
+                {indexingCompleted && processingStats && (
+                  <Alert className="mt-4 bg-green-500/10 text-green-700 border-green-500/30">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Extraction Complete</AlertTitle>
+                    <AlertDescription>
+                      <p className="mb-1">
+                        Successfully extracted{" "}
+                        {processingStats.returnedUrlCount} URLs (discovered{" "}
+                        {processingStats.discoveredUrlCount}
+                        {processingStats.capped ? ", API capped results" : ""}).
+                      </p>
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Key URL Analysis */}
+            <Card className="shadow-md border-0">
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="bg-purple-100 p-2 rounded-md">
+                    <Link2 className="h-5 w-5 text-purple-600" />
+                  </div>
+                  <CardTitle>Key URL Analysis</CardTitle>
+                </div>
+                <CardDescription>Key URLs Selected by AI</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isSelectingKeyUrls && (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>AI is selecting key URLs...</span>
+                      <span>Please wait...</span>
+                    </div>
+                    <Progress value={null} className="h-2" />
+                  </div>
+                )}
+                {keyUrlSelectionError && (
+                  <Alert variant="destructive" className="mt-4">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Analysis Error</AlertTitle>
+                    <AlertDescription>{keyUrlSelectionError}</AlertDescription>
+                  </Alert>
+                )}
+                <ScrollArea className="h-[300px] rounded-md border p-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">#</TableHead>
+                        <TableHead>URL</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {keyUrls.map((url, index) => (
+                        <TableRow key={`key-url-${index}`}>
+                          <TableCell>{index + 1}</TableCell>
+                          <TableCell
+                            className="text-blue-600 hover:underline cursor-pointer"
+                            title={url}
+                          >
+                            {url}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Analysis Tabs */}
+        {allUrls.length > 0 && (
+          <Tabs defaultValue="business" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="business" className="flex items-center gap-2">
+                <Lightbulb className="h-4 w-4" />
+                Business Understanding
+              </TabsTrigger>
+              <TabsTrigger value="content" className="flex items-center gap-2">
+                <FileBarChart2 className="h-4 w-4" />
+                Content Structure & Style
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="business">
+              <Card className="shadow-md border-0">
+                <CardHeader>
+                  <CardTitle className="text-2xl font-bold">
+                    Business Analysis
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {isAnalyzingBusiness && (
+                    <div className="mt-4 space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>AI is analyzing business content...</span>
+                        <span>Crawling pages and thinking...</span>
+                      </div>
+                      <Progress value={null} className="h-2" />
+                    </div>
+                  )}
+                  {businessAnalysisError && (
+                    <Alert variant="destructive" className="mt-4">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle>Business Analysis Error</AlertTitle>
+                      <AlertDescription>
+                        {businessAnalysisError}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {businessAnalysisCompleted && businessAnalysis && (
+                    <div className="mt-4 prose prose-sm sm:prose-base lg:prose-lg xl:prose-xl dark:prose-invert max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {businessAnalysis}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="content">
+              <Card className="shadow-md border-0">
+                <CardHeader>
+                  <CardTitle className="text-2xl font-bold">
+                    Content Structure & Style Analysis
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {isAnalyzingContentStructure && (
+                    <div className="mt-4 space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>AI is analyzing content structure...</span>
+                        <span>Scanning pages for patterns...</span>
+                      </div>
+                      <Progress value={null} className="h-2" />
+                    </div>
+                  )}
+                  {contentStructureAnalysisError && (
+                    <Alert variant="destructive" className="mt-4">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle>Content Structure Analysis Error</AlertTitle>
+                      <AlertDescription>
+                        {contentStructureAnalysisError}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {contentStructureAnalysisCompleted &&
+                    contentStructureAnalysis && (
+                      <div className="mt-4 prose prose-sm sm:prose-base lg:prose-lg xl:prose-xl dark:prose-invert max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {contentStructureAnalysis}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        )}
+      </div>
+    </div>
+  );
 }

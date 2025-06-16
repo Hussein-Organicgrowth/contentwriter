@@ -99,6 +99,10 @@ export interface IWebsite extends mongoose.Document {
   userId: string;
   sharedUsers: string[];
   platformIntegrations: PlatformConfig[];
+  sitemapUrls?: string[];
+  businessAnalysis?: string;
+  contentStructureAnalysis?: string;
+  keyUrls?: string[];
 }
 
 const websiteSchema = new mongoose.Schema({
@@ -236,6 +240,10 @@ const websiteSchema = new mongoose.Schema({
       ),
     },
   ],
+  sitemapUrls: { type: [String], default: [] },
+  businessAnalysis: { type: String, default: "" },
+  contentStructureAnalysis: { type: String, default: "" },
+  keyUrls: { type: [String], default: [] },
 });
 
 export const Website =
