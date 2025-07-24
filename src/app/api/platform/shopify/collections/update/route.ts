@@ -40,8 +40,19 @@ export async function POST(req: Request) {
   try {
     const { collectionId, description, company } = await req.json();
 
+    console.log("🚀 Collection Update Request:", {
+      collectionId,
+      company,
+      descriptionLength: description?.length,
+      hasDescription: !!description,
+    });
+
     if (!company || !collectionId || typeof description !== "string") {
-      // Check description type
+      console.error("❌ Invalid request data:", {
+        company: !!company,
+        collectionId: !!collectionId,
+        descriptionType: typeof description,
+      });
       return NextResponse.json(
         { error: "Missing or invalid required fields" },
         { status: 400 }
@@ -52,14 +63,21 @@ export async function POST(req: Request) {
 
     const website = await Website.findOne({ name: company });
     if (!website) {
+      console.error("❌ Website not found:", company);
       return NextResponse.json({ error: "Website not found" }, { status: 404 });
     }
+
+    console.log("✅ Website found:", website.name);
 
     const shopifyIntegration = website.platformIntegrations.find(
       (p: PlatformConfig) => p.platform === "shopify" && p.enabled
     );
 
     if (!shopifyIntegration) {
+      console.error(
+        "❌ Shopify integration not found or disabled for:",
+        company
+      );
       return NextResponse.json(
         { error: "Shopify integration not found or disabled" },
         { status: 404 }
@@ -67,62 +85,163 @@ export async function POST(req: Request) {
     }
 
     const { storeName, accessToken } = shopifyIntegration.credentials;
+    console.log("✅ Shopify integration found:", {
+      storeName,
+      hasAccessToken: !!accessToken,
+    });
 
     const formattedStoreName = storeName.includes(".myshopify.com")
       ? storeName
       : `${storeName}.myshopify.com`;
 
+    console.log("🔧 Formatted store name:", formattedStoreName);
+
     let shopifyResponse: Response | null = null;
     let updatedCollectionData: ShopifyCollectionResponse | null = null;
     let updateError: Error | null = null;
 
-    // --- Try updating as Custom Collection ---
+    // First, let's fetch the current collection to see its current state
+    console.log("🔍 Fetching current collection state...");
+
+    // Try to fetch as custom collection first
+    let currentCollection: ShopifyCollectionBase | null = null;
+    let collectionType: "custom" | "smart" | null = null;
+
     try {
-      shopifyResponse = await fetch(
+      const fetchCustomResponse = await fetch(
         `https://${formattedStoreName}/admin/api/2024-01/custom_collections/${collectionId}.json`,
         {
-          method: "PUT",
+          method: "GET",
           headers: {
             "X-Shopify-Access-Token": accessToken,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            custom_collection: {
-              id: collectionId,
-              body_html: description,
-            },
-          }),
         }
       );
 
-      if (shopifyResponse.ok) {
-        updatedCollectionData = await shopifyResponse.json();
-      } else if (shopifyResponse.status !== 404) {
-        // If it's not OK and not a 404, it's an actual error
-        const errorText = await shopifyResponse.text();
-        console.error("Shopify API error (Custom Collection):", {
-          status: shopifyResponse.status,
-          statusText: shopifyResponse.statusText,
-          body: errorText,
+      if (fetchCustomResponse.ok) {
+        const data = await fetchCustomResponse.json();
+        currentCollection = data.custom_collection;
+        collectionType = "custom";
+        console.log("✅ Found as custom collection:", {
+          id: currentCollection?.id,
+          title: currentCollection?.title,
+          published_at: currentCollection?.published_at,
+          published_scope: currentCollection?.published_scope,
+          current_body_html_length: currentCollection?.body_html?.length || 0,
         });
-        updateError = new Error(
-          `Failed to update custom collection: ${errorText}`
+      } else if (fetchCustomResponse.status === 404) {
+        console.log(
+          "⚠️ Not found as custom collection, trying smart collection..."
         );
+
+        // Try smart collection
+        const fetchSmartResponse = await fetch(
+          `https://${formattedStoreName}/admin/api/2024-01/smart_collections/${collectionId}.json`,
+          {
+            method: "GET",
+            headers: {
+              "X-Shopify-Access-Token": accessToken,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        if (fetchSmartResponse.ok) {
+          const data = await fetchSmartResponse.json();
+          currentCollection = data.smart_collection;
+          collectionType = "smart";
+          console.log("✅ Found as smart collection:", {
+            id: currentCollection?.id,
+            title: currentCollection?.title,
+            published_at: currentCollection?.published_at,
+            published_scope: currentCollection?.published_scope,
+            current_body_html_length: currentCollection?.body_html?.length || 0,
+          });
+        } else {
+          console.error("❌ Collection not found as smart collection either:", {
+            status: fetchSmartResponse.status,
+            statusText: fetchSmartResponse.statusText,
+          });
+        }
       }
-      // If it's a 404, we'll proceed to try Smart Collection
-    } catch (e) {
-      console.error("Fetch error updating custom collection:", e);
-      updateError = e instanceof Error ? e : new Error(String(e));
+    } catch (error) {
+      console.error("❌ Error fetching current collection:", error);
     }
 
-    // --- If Custom Collection failed with 404 (or wasn't found), try Smart Collection ---
-    if (
-      !updatedCollectionData &&
-      (!shopifyResponse || shopifyResponse.status === 404)
-    ) {
-      console.log(
-        `Custom collection ${collectionId} not found (404), trying smart collection...`
+    if (!currentCollection || !collectionType) {
+      console.error("❌ Collection not found:", collectionId);
+      return NextResponse.json(
+        { error: "Collection not found" },
+        { status: 404 }
       );
+    }
+
+    // Prepare update payload - ensure collection gets published
+    const updatePayload = {
+      id: collectionId,
+      body_html: description,
+      // Ensure the collection is published
+      published_at: currentCollection.published_at || new Date().toISOString(),
+      published_scope: "web", // Make sure it's published to web
+    };
+
+    console.log("📝 Update payload:", {
+      ...updatePayload,
+      body_html_length: updatePayload.body_html.length,
+      will_publish: !currentCollection.published_at
+        ? "YES - will publish now"
+        : "Already published",
+    });
+
+    // --- Update based on collection type ---
+    if (collectionType === "custom") {
+      console.log("🔄 Updating custom collection...");
+      try {
+        shopifyResponse = await fetch(
+          `https://${formattedStoreName}/admin/api/2024-01/custom_collections/${collectionId}.json`,
+          {
+            method: "PUT",
+            headers: {
+              "X-Shopify-Access-Token": accessToken,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              custom_collection: updatePayload,
+            }),
+          }
+        );
+
+        console.log("📡 Shopify response status:", shopifyResponse.status);
+
+        if (shopifyResponse.ok) {
+          updatedCollectionData = await shopifyResponse.json();
+          console.log("✅ Custom collection updated successfully:", {
+            id: updatedCollectionData.custom_collection?.id,
+            title: updatedCollectionData.custom_collection?.title,
+            published_at: updatedCollectionData.custom_collection?.published_at,
+            published_scope:
+              updatedCollectionData.custom_collection?.published_scope,
+            body_html_length:
+              updatedCollectionData.custom_collection?.body_html?.length || 0,
+          });
+        } else {
+          const errorText = await shopifyResponse.text();
+          console.error("❌ Shopify API error (Custom Collection):", {
+            status: shopifyResponse.status,
+            statusText: shopifyResponse.statusText,
+            body: errorText,
+          });
+          updateError = new Error(
+            `Failed to update custom collection: ${errorText}`
+          );
+        }
+      } catch (e) {
+        console.error("❌ Fetch error updating custom collection:", e);
+        updateError = e instanceof Error ? e : new Error(String(e));
+      }
+    } else if (collectionType === "smart") {
+      console.log("🔄 Updating smart collection...");
       try {
         shopifyResponse = await fetch(
           `https://${formattedStoreName}/admin/api/2024-01/smart_collections/${collectionId}.json`,
@@ -133,46 +252,70 @@ export async function POST(req: Request) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              smart_collection: {
-                id: collectionId,
-                body_html: description,
-              },
+              smart_collection: updatePayload,
             }),
           }
         );
 
+        console.log("📡 Shopify response status:", shopifyResponse.status);
+
         if (shopifyResponse.ok) {
           updatedCollectionData = await shopifyResponse.json();
-          updateError = null; // Clear previous error if smart collection update succeeds
+          console.log("✅ Smart collection updated successfully:", {
+            id: updatedCollectionData.smart_collection?.id,
+            title: updatedCollectionData.smart_collection?.title,
+            published_at: updatedCollectionData.smart_collection?.published_at,
+            published_scope:
+              updatedCollectionData.smart_collection?.published_scope,
+            body_html_length:
+              updatedCollectionData.smart_collection?.body_html?.length || 0,
+          });
         } else {
           const errorText = await shopifyResponse.text();
-          console.error("Shopify API error (Smart Collection):", {
+          console.error("❌ Shopify API error (Smart Collection):", {
             status: shopifyResponse.status,
             statusText: shopifyResponse.statusText,
             body: errorText,
           });
-          // If this also fails, set the error
           updateError = new Error(
-            `Failed to update smart collection after custom collection failed: ${errorText}`
+            `Failed to update smart collection: ${errorText}`
           );
         }
       } catch (e) {
-        console.error("Fetch error updating smart collection:", e);
+        console.error("❌ Fetch error updating smart collection:", e);
         updateError = e instanceof Error ? e : new Error(String(e));
       }
     }
 
     // --- Handle final result ---
     if (updatedCollectionData) {
+      const finalCollection =
+        updatedCollectionData.custom_collection ||
+        updatedCollectionData.smart_collection;
+
+      console.log("🎉 Collection update completed:", {
+        success: true,
+        collectionType,
+        id: finalCollection?.id,
+        title: finalCollection?.title,
+        isPublished: !!finalCollection?.published_at,
+        published_at: finalCollection?.published_at,
+        published_scope: finalCollection?.published_scope,
+      });
+
       return NextResponse.json({
         success: true,
-        // Return the correct collection type based on which one was updated
-        collection:
-          updatedCollectionData.custom_collection ||
-          updatedCollectionData.smart_collection,
+        collection: finalCollection,
+        collectionType,
+        debug: {
+          wasAlreadyPublished: !!currentCollection.published_at,
+          isNowPublished: !!finalCollection?.published_at,
+          published_at: finalCollection?.published_at,
+          published_scope: finalCollection?.published_scope,
+        },
       });
     } else {
-      // If we reach here, both attempts failed or an error occurred
+      console.error("❌ Final update failed:", updateError?.message);
       throw (
         updateError ||
         new Error(
@@ -181,13 +324,19 @@ export async function POST(req: Request) {
       );
     }
   } catch (error: unknown) {
-    console.error("Error updating collection:", error);
+    console.error("❌ Error updating collection:", error);
     const message =
       error instanceof Error
         ? error.message
         : "Internal server error during collection update";
-    // Determine appropriate status code based on error type if possible
     const status = message.includes("not found") ? 404 : 500;
+
+    console.error("❌ Returning error response:", {
+      message,
+      status,
+      originalError: error,
+    });
+
     return NextResponse.json({ error: message }, { status });
   }
 }
