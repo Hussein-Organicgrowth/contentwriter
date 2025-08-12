@@ -18,10 +18,11 @@ export default function WebshopPage() {
 			<div className="mx-auto max-w-5xl">
 				<div className="mb-8 text-center">
 					<h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-						Manage Your Shop
+						Manage Your Shop by organicgrowth
 					</h1>
 					<p className="mt-2 text-muted-foreground">
-						Select what you want to manage in your shop
+						Select what you want to manage in your shop 
+						
 					</p>
 				</div>
 				<div className="grid gap-6 md:grid-cols-2">
