@@ -1,16 +1,6 @@
 import { NextResponse } from "next/server";
 import connectToDatabase from "@/lib/mongodb";
 import { Website, PlatformConfig } from "@/models/Website";
-import { Redis } from "@upstash/redis";
-
-// Initialize Redis client
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
-
-const CACHE_KEY_PREFIX = "shopify:products:";
-const CACHE_DURATION = 3600; // 1 hour
 
 interface ShopifyProduct {
   id: string;
@@ -271,33 +261,6 @@ export async function GET(request: Request) {
 
     const { count: totalProducts } = await countResponse.json();
 
-    // Only use caching if we have more than 1000 products
-    const shouldUseCache = totalProducts > 1000;
-
-    if (shouldUseCache) {
-      // Check cache first
-      const cacheKey = `${CACHE_KEY_PREFIX}${company}:${
-        cursor || "initial"
-      }:${pageSize}`;
-      const cachedData = await redis.get(cacheKey);
-
-      if (cachedData) {
-        // Start background revalidation if cache is older than 30 minutes
-        const cacheAge = await redis.ttl(cacheKey);
-        if (cacheAge < CACHE_DURATION - 1800) {
-          // Trigger background revalidation
-          revalidateCache(company, cursor, pageSize).catch(console.error);
-        }
-
-        return NextResponse.json(cachedData, {
-          headers: {
-            "Cache-Control":
-              "public, s-maxage=3600, stale-while-revalidate=7200",
-          },
-        });
-      }
-    }
-
     // Fetch products using parallel processing
     const { products, pageInfo } = await fetchProductsInParallel(
       storeName,
@@ -319,19 +282,9 @@ export async function GET(request: Request) {
       },
     };
 
-    // Only cache if we have more than 1000 products
-    if (shouldUseCache) {
-      const cacheKey = `${CACHE_KEY_PREFIX}${company}:${
-        cursor || "initial"
-      }:${pageSize}`;
-      await redis.set(cacheKey, response, { ex: CACHE_DURATION });
-    }
-
     return NextResponse.json(response, {
       headers: {
-        "Cache-Control": shouldUseCache
-          ? "public, s-maxage=3600, stale-while-revalidate=7200"
-          : "no-store",
+        "Cache-Control": "no-store",
       },
     });
   } catch (error: unknown) {
@@ -344,37 +297,5 @@ export async function GET(request: Request) {
         : 500;
 
     return NextResponse.json({ error: message }, { status });
-  }
-}
-
-// Background revalidation function
-async function revalidateCache(
-  company: string,
-  cursor: string | null,
-  pageSize: number
-) {
-  try {
-    // Check if we should still use caching
-    const countResponse = await fetch(
-      `/api/platform/shopify/products/count?company=${company}`
-    );
-    const { count: totalProducts } = await countResponse.json();
-
-    if (totalProducts <= 1000) {
-      return; // Don't revalidate if we have 1000 or fewer products
-    }
-
-    const cacheKey = `${CACHE_KEY_PREFIX}${company}:${
-      cursor || "initial"
-    }:${pageSize}`;
-    const response = await fetch(
-      `/api/platform/shopify/products?company=${company}&cursor=${
-        cursor || ""
-      }&pageSize=${pageSize}`
-    );
-    const data = await response.json();
-    await redis.set(cacheKey, data, { ex: CACHE_DURATION });
-  } catch (error) {
-    console.error("Error revalidating cache:", error);
   }
 }
