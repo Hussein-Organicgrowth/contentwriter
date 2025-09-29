@@ -2,6 +2,84 @@ import { NextResponse } from "next/server";
 import connectToDatabase from "@/lib/mongodb";
 import { Website, PlatformConfig } from "@/models/Website";
 
+// In-memory cache for product data
+interface CacheEntry {
+  data: ProductsResponse;
+  timestamp: number;
+  cursor?: string;
+}
+
+interface ProductsResponse {
+  products: ShopifyProduct[];
+  total: number;
+  pagination: {
+    hasNextPage: boolean;
+    endCursor: string | null;
+  };
+  progress: {
+    current: number;
+    total: number;
+    percentage: number;
+  };
+}
+
+const productCache = new Map<string, CacheEntry>();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+function getCacheKey(company: string, cursor?: string | null): string {
+  return `${company}:${cursor || "initial"}`;
+}
+
+function isCacheValid(entry: CacheEntry): boolean {
+  return Date.now() - entry.timestamp < CACHE_DURATION;
+}
+
+function getCachedData(
+  company: string,
+  cursor?: string | null
+): ProductsResponse | null {
+  const key = getCacheKey(company, cursor);
+  const entry = productCache.get(key);
+
+  if (entry && isCacheValid(entry)) {
+    console.log(`Cache hit for ${key}`);
+    return entry.data;
+  }
+
+  console.log(`Cache miss for ${key}`);
+  return null;
+}
+
+function setCachedData(
+  company: string,
+  cursor: string | null,
+  data: ProductsResponse
+): void {
+  const key = getCacheKey(company, cursor);
+  productCache.set(key, {
+    data,
+    timestamp: Date.now(),
+    cursor: cursor || undefined,
+  });
+
+  // Clean up old cache entries (keep only last 10 entries per company)
+  const companyKeys = Array.from(productCache.keys()).filter((k) =>
+    k.startsWith(company)
+  );
+  if (companyKeys.length > 10) {
+    const sortedKeys = companyKeys.sort((a, b) => {
+      const entryA = productCache.get(a)!;
+      const entryB = productCache.get(b)!;
+      return entryA.timestamp - entryB.timestamp;
+    });
+
+    // Remove oldest entries
+    for (let i = 0; i < sortedKeys.length - 10; i++) {
+      productCache.delete(sortedKeys[i]);
+    }
+  }
+}
+
 interface ShopifyProduct {
   id: string;
   title: string;
@@ -62,6 +140,10 @@ const PRODUCTS_QUERY = `
           bodyHtml
           vendor
           status
+          seo {
+            title
+            description
+          }
           images(first: 1) {
             edges {
               node {
@@ -182,6 +264,8 @@ async function fetchProductsBatch(
     images: edge.node.images.edges.map((img) => ({
       src: img.node.url,
     })),
+    seoTitle: (edge.node as any).seo?.title || "",
+    seoDescription: (edge.node as any).seo?.description || "",
   }));
 
   console.log("Fetched products batch:", {
@@ -199,14 +283,53 @@ async function fetchProductsBatch(
 async function fetchProductsInParallel(
   storeName: string,
   accessToken: string,
-  cursor: string | null
-): Promise<{ products: ShopifyProduct[]; pageInfo: PageInfo }> {
-  // Always fetch 250 products
-  const result = await fetchProductsBatch(storeName, accessToken, cursor);
+  cursor: string | null,
+  batchCount: number = 1
+): Promise<{
+  products: ShopifyProduct[];
+  pageInfo: PageInfo;
+  totalFetched: number;
+}> {
+  // For large stores, fetch multiple batches in parallel
+  const promises: Promise<{
+    products: ShopifyProduct[];
+    pageInfo: PageInfo;
+  }>[] = [];
+  const currentCursor = cursor;
+
+  // Create first batch promise
+  promises.push(fetchProductsBatch(storeName, accessToken, currentCursor));
+
+  // If we want multiple batches and this isn't the first load, prepare parallel requests
+  if (batchCount > 1 && cursor) {
+    // For subsequent loads, we can only do sequential due to cursor-based pagination
+    // But we can optimize by increasing the batch size
+    const result = await fetchProductsBatch(storeName, accessToken, cursor);
+    return {
+      products: result.products,
+      pageInfo: result.pageInfo,
+      totalFetched: result.products.length,
+    };
+  }
+
+  // Execute the batch(es)
+  const results = await Promise.all(promises);
+
+  // Combine results
+  const allProducts: ShopifyProduct[] = [];
+  let finalPageInfo: PageInfo = { hasNextPage: false, endCursor: null };
+
+  for (const result of results) {
+    allProducts.push(...result.products);
+    if (result.pageInfo.hasNextPage) {
+      finalPageInfo = result.pageInfo;
+    }
+  }
 
   return {
-    products: result.products,
-    pageInfo: result.pageInfo,
+    products: allProducts,
+    pageInfo: finalPageInfo,
+    totalFetched: allProducts.length,
   };
 }
 
@@ -215,16 +338,32 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const company = searchParams.get("company");
     const cursor = searchParams.get("cursor");
+    // pageSize parameter for future use
     const pageSize = Math.min(
       parseInt(searchParams.get("pageSize") || "250"),
       250
     );
+    console.log("Page size requested:", pageSize);
+    const bypassCache = searchParams.get("bypassCache") === "true";
 
     if (!company) {
       return NextResponse.json(
         { error: "Company parameter is required" },
         { status: 400 }
       );
+    }
+
+    // Check cache first (unless bypassing)
+    if (!bypassCache) {
+      const cachedData = getCachedData(company, cursor);
+      if (cachedData) {
+        return NextResponse.json(cachedData, {
+          headers: {
+            "Cache-Control": "no-store",
+            "X-Cache": "HIT",
+          },
+        });
+      }
     }
 
     await connectToDatabase();
@@ -261,12 +400,22 @@ export async function GET(request: Request) {
 
     const { count: totalProducts } = await countResponse.json();
 
-    // Fetch products using parallel processing
-    const { products, pageInfo } = await fetchProductsInParallel(
+    // Determine batch count based on store size and whether this is initial load
+    const isInitialLoad = !cursor;
+    const batchCount = isInitialLoad && totalProducts > 1000 ? 2 : 1;
+
+    // Fetch products using optimized processing
+    const { products, pageInfo, totalFetched } = await fetchProductsInParallel(
       storeName,
       accessToken,
-      cursor
+      cursor,
+      batchCount
     );
+
+    // Calculate cumulative progress if cursor is provided
+    const currentProgress = cursor
+      ? Math.min(totalProducts, totalFetched)
+      : totalFetched;
 
     const response = {
       products,
@@ -276,15 +425,19 @@ export async function GET(request: Request) {
         endCursor: pageInfo.endCursor,
       },
       progress: {
-        current: products.length,
+        current: currentProgress,
         total: totalProducts,
-        percentage: (products.length / totalProducts) * 100,
+        percentage: Math.min(100, (currentProgress / totalProducts) * 100),
       },
     };
+
+    // Cache the response
+    setCachedData(company, cursor, response);
 
     return NextResponse.json(response, {
       headers: {
         "Cache-Control": "no-store",
+        "X-Cache": "MISS",
       },
     });
   } catch (error: unknown) {

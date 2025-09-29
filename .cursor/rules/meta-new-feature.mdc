@@ -1,0 +1,17 @@
+---
+alwaysApply: false
+---
+
+So when the user lands on this http://localhost:3000/dashboard/webshop/products and have setup their shopify intetation. They are able to see their products and generate descreption for their products.
+
+So im building a feature that allows the user to generate page titles and meta description when generating a product description.
+
+So when the product has generated and the user clicks on view changes. It show also show page title and meta description.
+
+We make sure to save the title and page title using monogodb.
+
+These are the steps.
+
+Update the component for the view changes
+Make sure to update the model
+Make sure when generating the description is also generates a page title and meta description, but is important is not in the same call.

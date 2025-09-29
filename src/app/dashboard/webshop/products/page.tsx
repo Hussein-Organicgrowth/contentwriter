@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,12 +42,18 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
+import { Switch } from "@/components/ui/switch";
 
 interface PendingDescription {
   productId: string;
   oldDescription: string;
   newDescription: string;
   generatedAt: string;
+  oldSeoTitle?: string;
+  oldSeoDescription?: string;
+  newSeoTitle?: string;
+  newSeoDescription?: string;
+  summaryHtml?: string;
 }
 
 interface DescriptionHistory {
@@ -72,6 +78,8 @@ interface ShopifyProduct {
   descriptionHistory?: DescriptionHistory[];
   isPublished?: boolean;
   publishedAt?: string;
+  seoTitle?: string;
+  seoDescription?: string;
 }
 
 interface ProductsResponse {
@@ -122,6 +130,76 @@ type CountryType =
   | "BR"
   | "MX";
 
+type DescriptionPlacementMode = "body_html" | "metafield";
+
+type MetafieldTypeOption = "single_line_text_field" | "multi_line_text_field";
+
+interface DescriptionPlacementSettings {
+  mode: DescriptionPlacementMode;
+  metafieldNamespace: string;
+  metafieldKey: string;
+  metafieldType: MetafieldTypeOption;
+}
+
+const defaultDescriptionPlacement: DescriptionPlacementSettings = {
+  mode: "body_html",
+  metafieldNamespace: "",
+  metafieldKey: "",
+  metafieldType: "multi_line_text_field",
+};
+
+const normalizeDescriptionPlacement = (
+  raw?: Partial<DescriptionPlacementSettings> | null
+): DescriptionPlacementSettings => {
+  if (!raw) {
+    return { ...defaultDescriptionPlacement };
+  }
+
+  if (raw.mode === "metafield") {
+    const namespace = raw.metafieldNamespace?.trim() || "";
+    const key = raw.metafieldKey?.trim() || "";
+    const type: MetafieldTypeOption =
+      raw.metafieldType === "single_line_text_field"
+        ? "single_line_text_field"
+        : "multi_line_text_field";
+
+    if (!namespace || !key) {
+      return { ...defaultDescriptionPlacement };
+    }
+
+    return {
+      mode: "metafield",
+      metafieldNamespace: namespace,
+      metafieldKey: key,
+      metafieldType: type,
+    };
+  }
+
+  return { ...defaultDescriptionPlacement };
+};
+
+const sanitizeDescriptionPlacement = (
+  placement: DescriptionPlacementSettings
+): DescriptionPlacementSettings => {
+  if (placement.mode === "metafield") {
+    return {
+      mode: "metafield",
+      metafieldNamespace: placement.metafieldNamespace.trim(),
+      metafieldKey: placement.metafieldKey.trim(),
+      metafieldType: placement.metafieldType,
+    };
+  }
+
+  return { ...defaultDescriptionPlacement };
+};
+
+const truncateHtmlForPreview = (html: string, maxLength = 280) => {
+  if (!html) return "";
+  const sanitized = html.replace(/\s+/g, " ").trim();
+  if (sanitized.length <= maxLength) return sanitized;
+  return `${sanitized.slice(0, maxLength - 3)}...`;
+};
+
 export default function ProductsPage() {
   const [isConnected, setIsConnected] = useState(false);
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
@@ -164,14 +242,51 @@ export default function ProductsPage() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [currentCursor, setCurrentCursor] = useState<string | null>(null);
+  const nextCursorRef = useRef<string | null>(null);
   const [progress, setProgress] = useState<{
     current: number;
     total: number;
     percentage: number;
   } | null>(null);
+  const [loadedProductsCount, setLoadedProductsCount] = useState(0);
+  const [autoLoadEnabled, setAutoLoadEnabled] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(25); // Increased default page size
   const [totalPages, setTotalPages] = useState(1);
+  const [virtualizedView, setVirtualizedView] = useState(false);
+  const [descriptionPlacement, setDescriptionPlacement] =
+    useState<DescriptionPlacementSettings>({
+      ...defaultDescriptionPlacement,
+    });
+  const [syncSeoFields, setSyncSeoFields] = useState(false);
+  const isCompareOpenRef = useRef(false);
+
+  useEffect(() => {
+    isCompareOpenRef.current = isCompareOpen;
+  }, [isCompareOpen]);
+
+  // Debug function to check current state
+  const debugState = () => {
+    console.log("Current State Debug:", {
+      isGenerating,
+      pendingDescriptionsCount: Object.keys(pendingDescriptions).length,
+      pendingDescriptions,
+      filteredProductsCount: filteredProducts.length,
+      company,
+      isConnected,
+    });
+  };
+
+  // Add debug to window for easy access
+  useEffect(() => {
+    (window as any).debugProductsState = debugState;
+  }, [
+    isGenerating,
+    pendingDescriptions,
+    filteredProducts,
+    company,
+    isConnected,
+  ]);
 
   useEffect(() => {
     // Get company from localStorage
@@ -321,6 +436,17 @@ export default function ProductsPage() {
           // We don't set the access token for security reasons
           // It will be masked in the UI
         }
+
+        setDescriptionPlacement(
+          normalizeDescriptionPlacement(
+            data.settings?.settings?.descriptionPlacement
+          )
+        );
+        setSyncSeoFields(
+          typeof data.settings?.settings?.syncSeoFields === "boolean"
+            ? data.settings.settings.syncSeoFields
+            : false
+        );
       }
     } catch (error) {
       console.error("Error fetching Shopify settings:", error);
@@ -367,6 +493,9 @@ export default function ProductsPage() {
           },
           enabled: true,
           company,
+          descriptionPlacement:
+            sanitizeDescriptionPlacement(descriptionPlacement),
+          syncSeoFields,
         }),
       });
 
@@ -408,12 +537,17 @@ export default function ProductsPage() {
         enabled: boolean;
         company: string;
         keepExistingToken?: boolean;
+        descriptionPlacement: DescriptionPlacementSettings;
+        syncSeoFields: boolean;
       } = {
         credentials: {
           storeName,
         },
         enabled: true,
         company,
+        descriptionPlacement:
+          sanitizeDescriptionPlacement(descriptionPlacement),
+        syncSeoFields,
       };
 
       // Only include the access token if it's provided
@@ -475,7 +609,11 @@ export default function ProductsPage() {
 
       const [productsResponse, pendingResponse, publishedResponse] =
         await Promise.all([
-          fetch(`/api/platform/shopify/products?${queryParams}`),
+          fetch(
+            `/api/platform/shopify/products?${queryParams}${
+              cursor ? "" : "&bypassCache=false"
+            }`
+          ),
           fetch(`/api/platform/shopify/pending?company=${companyName}`),
           fetch(`/api/platform/shopify/published?company=${companyName}`),
         ]);
@@ -513,50 +651,32 @@ export default function ProductsPage() {
           );
           const newProducts = Array.from(uniqueProducts.values());
 
-          // Calculate progress based on accumulated products
-          const currentCount = newProducts.length;
-          const totalCount = productsData.total;
-          const percentage = (currentCount / totalCount) * 100;
-
-          console.log("Calculating progress after update:", {
-            currentCount,
-            totalCount,
-            percentage,
-            existingProducts: prev.length,
-            newProducts: productsData.products.length,
-            allProducts: newProducts.length,
-          });
-
-          // Update progress state
-          setProgress({
-            current: currentCount,
-            total: totalCount,
-            percentage: percentage,
-          });
+          // Update loaded count
+          setLoadedProductsCount(newProducts.length);
 
           return newProducts;
         });
       } else {
         console.log("Setting new products list");
         setProducts(productsData.products);
+        setLoadedProductsCount(productsData.products.length);
+      }
 
-        // Calculate initial progress
-        const currentCount = productsData.products.length;
-        const totalCount = productsData.total;
-        const percentage = (currentCount / totalCount) * 100;
-
-        console.log("Calculating initial progress:", {
-          currentCount,
-          totalCount,
-          percentage,
-          products: productsData.products.length,
-        });
-
-        // Update progress state
+      // Update progress based on API response
+      if (productsData.progress) {
         setProgress({
-          current: currentCount,
-          total: totalCount,
-          percentage: percentage,
+          current: cursor
+            ? loadedProductsCount + productsData.products.length
+            : productsData.progress.current,
+          total: productsData.progress.total,
+          percentage: cursor
+            ? Math.min(
+                100,
+                ((loadedProductsCount + productsData.products.length) /
+                  productsData.progress.total) *
+                  100
+              )
+            : productsData.progress.percentage,
         });
       }
 
@@ -672,17 +792,23 @@ export default function ProductsPage() {
         setHasMore(productsData.pagination.hasNextPage);
         setCurrentCursor(productsData.pagination.endCursor);
 
-        // Only load more if we're not already loading and there are more products
+        if (productsData.pagination.hasNextPage) {
+          nextCursorRef.current = productsData.pagination.endCursor;
+        }
+
         if (
           productsData.pagination.hasNextPage &&
           productsData.pagination.endCursor &&
-          !isLoadingMore
+          !isLoadingMore &&
+          !isCompareOpenRef.current &&
+          autoLoadEnabled
         ) {
-          console.log("More products available, loading next page");
-          // Use a longer delay to prevent rapid loading
+          console.log("More products available, auto-loading next page");
           setTimeout(() => {
-            loadMoreProducts(productsData.pagination.endCursor);
-          }, 2000);
+            if (!isCompareOpenRef.current && autoLoadEnabled) {
+              loadMoreProducts(productsData.pagination.endCursor);
+            }
+          }, 1000); // Reduced delay for faster loading
         }
       }
 
@@ -701,6 +827,15 @@ export default function ProductsPage() {
     }
   };
 
+  useEffect(() => {
+    if (!isCompareOpen && nextCursorRef.current && hasMore && autoLoadEnabled) {
+      const storedCompany = localStorage.getItem("company");
+      if (storedCompany) {
+        loadMoreProducts(nextCursorRef.current);
+      }
+    }
+  }, [isCompareOpen, hasMore, autoLoadEnabled]);
+
   const loadMoreProducts = (cursor?: string | null) => {
     const currentCompany = localStorage.getItem("company");
     console.log("loadMoreProducts called with state:", {
@@ -708,18 +843,29 @@ export default function ProductsPage() {
       cursor: cursor || currentCursor,
       isLoadingMore,
       hasMore,
+      isCompareOpen: isCompareOpenRef.current,
     });
 
+    if (isCompareOpenRef.current || !autoLoadEnabled) {
+      if (cursor) {
+        nextCursorRef.current = cursor;
+      }
+      return;
+    }
+
     if (currentCompany && !isLoadingMore && hasMore) {
+      const nextCursor = cursor || currentCursor;
+      nextCursorRef.current = nextCursor;
       console.log("Conditions met, proceeding to fetch more products");
-      // Use provided cursor or fall back to currentCursor state
-      fetchProducts(currentCompany, cursor || currentCursor);
+      fetchProducts(currentCompany, nextCursor);
     } else {
       console.log("Conditions not met:", {
         hasCompany: !!currentCompany,
         hasCursor: !!(cursor || currentCursor),
         isNotLoading: !isLoadingMore,
         hasMoreItems: hasMore,
+        isCompareOpen: isCompareOpenRef.current,
+        autoLoadEnabled,
       });
     }
   };
@@ -750,15 +896,22 @@ export default function ProductsPage() {
 
   const generateAndSavePendingDescription = async (product: ShopifyProduct) => {
     try {
-      // Create a new object for isGenerating state update to trigger re-render
-      const newIsGenerating = { ...isGenerating };
-      newIsGenerating[product.id] = true;
-      setIsGenerating(newIsGenerating);
+      console.log(
+        `Starting generation for product: ${product.id} - ${product.title}`
+      );
 
+      // Set generating state immediately
+      setIsGenerating((prev) => ({ ...prev, [product.id]: true }));
+
+      // Force UI update
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      console.log("Calling description generation API...");
       const generateResponse = await fetch("/api/generate/description", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-description-destination": descriptionPlacement.mode,
         },
         body: JSON.stringify({
           title: product.title,
@@ -766,14 +919,53 @@ export default function ProductsPage() {
           existingDescription: product.body_html || "",
           language: selectedLanguage,
           targetCountry: selectedCountry,
+          keyword: product.title,
         }),
       });
 
       if (!generateResponse.ok) {
-        throw new Error("Failed to generate description");
+        const errorText = await generateResponse.text();
+        console.error("Description generation failed:", errorText);
+        throw new Error(
+          `Failed to generate description: ${generateResponse.status} - ${errorText}`
+        );
       }
 
-      const { description: newDescription } = await generateResponse.json();
+      console.log("Description generation successful, parsing response...");
+
+      const {
+        description: newDescription,
+        seoTitle: generatedSeoTitle,
+        seoDescription: generatedSeoDescription,
+        summaryHtml,
+      } = await generateResponse.json();
+
+      const resolvedDescription =
+        descriptionPlacement.mode === "metafield" && summaryHtml
+          ? `${summaryHtml}
+${newDescription}`
+          : newDescription;
+
+      const existingPending = pendingDescriptions[product.id];
+      const baselineOldSeoTitle =
+        existingPending?.oldSeoTitle ?? product.seoTitle ?? "";
+      const baselineOldSeoDescription =
+        existingPending?.oldSeoDescription ?? product.seoDescription ?? "";
+
+      console.log("Saving pending description to database...");
+      const pendingData = {
+        productId: product.id,
+        oldDescription: product.body_html || "",
+        newDescription: resolvedDescription,
+        company,
+        oldSeoTitle: baselineOldSeoTitle,
+        oldSeoDescription: baselineOldSeoDescription,
+        newSeoTitle: generatedSeoTitle || "",
+        newSeoDescription: generatedSeoDescription || "",
+        summaryHtml: summaryHtml || "",
+      };
+
+      console.log("Pending data to save:", pendingData);
 
       // Save pending description
       const savePendingResponse = await fetch("/api/platform/shopify/pending", {
@@ -781,39 +973,65 @@ export default function ProductsPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          productId: product.id,
-          oldDescription: product.body_html || "",
-          newDescription,
-          company,
-        }),
+        body: JSON.stringify(pendingData),
       });
 
       if (!savePendingResponse.ok) {
-        throw new Error("Failed to save pending description");
+        const errorText = await savePendingResponse.text();
+        console.error("Failed to save pending description:", errorText);
+        throw new Error(
+          `Failed to save pending description: ${savePendingResponse.status} - ${errorText}`
+        );
       }
 
-      // Update local state with new pending description
-      setPendingDescriptions((prevPendingDescriptions) => ({
-        ...prevPendingDescriptions,
-        [product.id]: {
-          productId: product.id,
-          oldDescription: product.body_html || "",
-          newDescription,
-          generatedAt: new Date().toISOString(),
-        },
-      }));
+      console.log("Pending description saved successfully");
 
-      toast.success("Description generated successfully");
+      // Create the pending description object
+      const newPendingDescription = {
+        productId: product.id,
+        oldDescription: product.body_html || "",
+        newDescription: resolvedDescription,
+        generatedAt: new Date().toISOString(),
+        oldSeoTitle: baselineOldSeoTitle,
+        oldSeoDescription: baselineOldSeoDescription,
+        newSeoTitle: generatedSeoTitle || "",
+        newSeoDescription: generatedSeoDescription || "",
+        summaryHtml: summaryHtml || "",
+      };
+
+      console.log("Updating local state with:", newPendingDescription);
+
+      // Update local state with new pending description
+      setPendingDescriptions((prev) => {
+        const updated = {
+          ...prev,
+          [product.id]: newPendingDescription,
+        };
+        console.log("Updated pending descriptions:", updated);
+        return updated;
+      });
+
+      toast.success("Description generated and saved successfully!");
+
+      // Force a re-render to show the pending state
+      setTimeout(() => {
+        filterProducts();
+        debugState(); // Log state after update
+      }, 100);
     } catch (error) {
       console.error("Error generating description:", error);
-      toast.error("Failed to generate description");
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to generate description";
+      toast.error(errorMessage);
     } finally {
       // Update isGenerating state by removing the current product
-      setIsGenerating((prevIsGenerating) => {
-        const newIsGenerating = { ...prevIsGenerating };
-        delete newIsGenerating[product.id];
-        return newIsGenerating;
+      setIsGenerating((prev) => {
+        const updated = { ...prev };
+        delete updated[product.id];
+        console.log("Updated generating state:", updated);
+        return updated;
       });
     }
   };
@@ -849,6 +1067,7 @@ export default function ProductsPage() {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              "x-description-destination": descriptionPlacement.mode,
             },
             body: JSON.stringify({
               title: product.title,
@@ -858,6 +1077,7 @@ export default function ProductsPage() {
               targetCountry: selectedCountry,
               timestamp: new Date().getTime(),
               productIndex: successCount + failCount,
+              keyword: product.title,
             }),
           });
 
@@ -865,7 +1085,24 @@ export default function ProductsPage() {
             throw new Error("Failed to generate description");
           }
 
-          const { description: newDescription } = await generateResponse.json();
+          const {
+            description: newDescription,
+            seoTitle: generatedSeoTitle,
+            seoDescription: generatedSeoDescription,
+            summaryHtml,
+          } = await generateResponse.json();
+
+          const resolvedDescription =
+            descriptionPlacement.mode === "metafield" && summaryHtml
+              ? `${summaryHtml}
+${newDescription}`
+              : newDescription;
+
+          const existingPending = updatedPendingDescriptions[product.id];
+          const baselineOldSeoTitle =
+            existingPending?.oldSeoTitle ?? product.seoTitle ?? "";
+          const baselineOldSeoDescription =
+            existingPending?.oldSeoDescription ?? product.seoDescription ?? "";
 
           // Save pending description
           const savePendingResponse = await fetch(
@@ -878,8 +1115,13 @@ export default function ProductsPage() {
               body: JSON.stringify({
                 productId: product.id,
                 oldDescription: product.body_html || "",
-                newDescription,
+                newDescription: resolvedDescription,
                 company,
+                oldSeoTitle: baselineOldSeoTitle,
+                oldSeoDescription: baselineOldSeoDescription,
+                newSeoTitle: generatedSeoTitle || "",
+                newSeoDescription: generatedSeoDescription || "",
+                summaryHtml: summaryHtml || "",
               }),
             }
           );
@@ -892,8 +1134,13 @@ export default function ProductsPage() {
           updatedPendingDescriptions[product.id] = {
             productId: product.id,
             oldDescription: product.body_html || "",
-            newDescription,
+            newDescription: resolvedDescription,
             generatedAt: new Date().toISOString(),
+            oldSeoTitle: baselineOldSeoTitle,
+            oldSeoDescription: baselineOldSeoDescription,
+            newSeoTitle: generatedSeoTitle || "",
+            newSeoDescription: generatedSeoDescription || "",
+            summaryHtml: summaryHtml || "",
           };
 
           successCount++;
@@ -952,6 +1199,15 @@ export default function ProductsPage() {
           productId: String(product.id),
           description: pendingDescription.newDescription,
           company,
+          seoTitle: pendingDescription.newSeoTitle,
+          seoDescription: pendingDescription.newSeoDescription,
+          summaryHtml:
+            descriptionPlacement.mode === "metafield"
+              ? truncateHtmlForPreview(
+                  pendingDescription.summaryHtml || "",
+                  1000
+                )
+              : undefined,
         }),
       });
 
@@ -989,44 +1245,64 @@ export default function ProductsPage() {
       // Get the updated product data
       const { product: updatedProduct } = await updateResponse.json();
 
-      // Update all states in a single batch
       setProducts((prevProducts) =>
         prevProducts.map((p) =>
           String(p.id) === String(product.id)
             ? {
+                ...p,
                 ...updatedProduct,
+                body_html:
+                  descriptionPlacement.mode === "metafield"
+                    ? p.body_html
+                    : pendingDescription.newDescription,
                 isPublished: true,
                 publishedAt,
-                body_html: pendingDescription.newDescription,
               }
             : p
         )
       );
 
-      // Update published products set
       setPublishedProducts((prev) => {
         const newSet = new Set(prev);
         newSet.add(String(product.id));
         return newSet;
       });
 
-      // Update pending descriptions
       setPendingDescriptions((prev) => {
         const newPending = { ...prev };
-        if (newPending[product.id]) {
-          newPending[product.id] = {
-            ...newPending[product.id],
-            oldDescription: pendingDescription.newDescription,
-          };
-        }
+        delete newPending[product.id];
         return newPending;
       });
 
-      // Force a UI update by triggering a filter
-      setFilteredProducts((prev) => [...prev]);
+      if (
+        selectedProduct &&
+        String(selectedProduct.id) === String(product.id)
+      ) {
+        setSelectedProduct((prev) =>
+          prev
+            ? {
+                ...prev,
+                ...updatedProduct,
+                body_html:
+                  descriptionPlacement.mode === "metafield"
+                    ? truncateHtmlForPreview(
+                        pendingDescription.summaryHtml || prev.body_html || ""
+                      )
+                    : pendingDescription.newDescription,
+                seoTitle: pendingDescription.newSeoTitle || prev.seoTitle,
+                seoDescription:
+                  pendingDescription.newSeoDescription || prev.seoDescription,
+                isPublished: true,
+                publishedAt,
+              }
+            : prev
+        );
+      }
+
+      fetchPendingDescriptions(company);
+      fetchProducts(company);
 
       toast.success("Product description updated successfully");
-      setIsCompareOpen(false);
     } catch (error) {
       console.error("Error publishing description:", error);
       toast.error("Failed to publish description");
@@ -1195,10 +1471,23 @@ export default function ProductsPage() {
       if (pendingDesc) {
         setLocalPendingDescription(pendingDesc);
         setEditedDescription(pendingDesc.newDescription);
+      } else {
+        setLocalPendingDescription(null);
+        setEditedDescription(selectedProduct.body_html || "");
       }
     }, [selectedProduct, pendingDescriptions]);
 
     if (!selectedProduct) return null;
+
+    const originalSeoTitle =
+      localPendingDescription?.oldSeoTitle ?? selectedProduct.seoTitle ?? "";
+    const originalSeoDescription =
+      localPendingDescription?.oldSeoDescription ??
+      selectedProduct.seoDescription ??
+      "";
+    const pendingSeoTitle = localPendingDescription?.newSeoTitle ?? "";
+    const pendingSeoDescription =
+      localPendingDescription?.newSeoDescription ?? "";
 
     const handleRegenerate = async () => {
       if (!selectedProduct) return;
@@ -1211,6 +1500,7 @@ export default function ProductsPage() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "x-description-destination": descriptionPlacement.mode,
           },
           body: JSON.stringify({
             title: selectedProduct.title,
@@ -1218,6 +1508,7 @@ export default function ProductsPage() {
             existingDescription: selectedProduct.body_html || "",
             language: selectedLanguage,
             targetCountry: selectedCountry,
+            keyword: selectedProduct.title,
           }),
         });
 
@@ -1225,13 +1516,27 @@ export default function ProductsPage() {
           throw new Error("Failed to generate description");
         }
 
-        const { description: newDescription } = await generateResponse.json();
+        const {
+          description: newDescription,
+          seoTitle: generatedSeoTitle,
+          seoDescription: generatedSeoDescription,
+          summaryHtml,
+        } = await generateResponse.json();
 
         // Remove any ```html tags from the description
         const cleanDescription = newDescription.replace(
           /```html\n?|\n?```/g,
           ""
         );
+
+        const baselineOldSeoTitle =
+          localPendingDescription?.oldSeoTitle ??
+          selectedProduct.seoTitle ??
+          "";
+        const baselineOldSeoDescription =
+          localPendingDescription?.oldSeoDescription ??
+          selectedProduct.seoDescription ??
+          "";
 
         // Save pending description
         const savePendingResponse = await fetch(
@@ -1249,6 +1554,11 @@ export default function ProductsPage() {
                 "",
               newDescription: cleanDescription,
               company,
+              oldSeoTitle: baselineOldSeoTitle,
+              oldSeoDescription: baselineOldSeoDescription,
+              newSeoTitle: generatedSeoTitle || "",
+              newSeoDescription: generatedSeoDescription || "",
+              summaryHtml: summaryHtml || "",
             }),
           }
         );
@@ -1266,6 +1576,11 @@ export default function ProductsPage() {
             "",
           newDescription: cleanDescription,
           generatedAt: new Date().toISOString(),
+          oldSeoTitle: baselineOldSeoTitle,
+          oldSeoDescription: baselineOldSeoDescription,
+          newSeoTitle: generatedSeoTitle || "",
+          newSeoDescription: generatedSeoDescription || "",
+          summaryHtml: summaryHtml || "",
         };
 
         setLocalPendingDescription(newPendingDesc);
@@ -1324,6 +1639,15 @@ export default function ProductsPage() {
             productId: selectedProduct.id,
             description: localPendingDescription.oldDescription,
             company,
+            seoTitle: localPendingDescription.oldSeoTitle,
+            seoDescription: localPendingDescription.oldSeoDescription,
+            summaryHtml:
+              descriptionPlacement.mode === "metafield"
+                ? truncateHtmlForPreview(
+                    localPendingDescription.oldDescription || "",
+                    1000
+                  )
+                : undefined,
           }),
         });
 
@@ -1444,27 +1768,73 @@ export default function ProductsPage() {
                   </p>
                 </div>
               </div>
-              <DialogDescription className="flex items-center justify-between">
-                <span>Review and edit the changes before publishing</span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleRegenerate}
-                    disabled={isRegenerating}
-                  >
-                    {isRegenerating ? (
-                      <>
-                        <span className="animate-spin mr-2">⟳</span>
-                        Regenerating...
-                      </>
-                    ) : (
-                      "Regenerate Description"
-                    )}
-                  </Button>
-                </div>
+              <DialogDescription>
+                Review and edit the changes before publishing
               </DialogDescription>
+              <div className="flex items-center justify-between mt-2">
+                <p className="text-sm text-muted-foreground flex items-center gap-2">
+                  <span>Current destination:</span>
+                  <span className="font-medium">
+                    {descriptionPlacement.mode === "metafield"
+                      ? `${descriptionPlacement.metafieldNamespace}.${descriptionPlacement.metafieldKey}`
+                      : "Product description (body_html)"}
+                  </span>
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleRegenerate}
+                  disabled={isRegenerating}
+                >
+                  {isRegenerating ? (
+                    <span className="flex items-center gap-2">
+                      <span className="animate-spin">⟳</span>
+                      Regenerating...
+                    </span>
+                  ) : (
+                    "Regenerate Description"
+                  )}
+                </Button>
+              </div>
             </DialogHeader>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              <div className="rounded-lg border bg-muted/60 p-3 space-y-2">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Original SEO Title
+                  </p>
+                  <p className="mt-1 text-xs text-foreground">
+                    {originalSeoTitle || "No SEO title available"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Original Meta Description
+                  </p>
+                  <p className="mt-1 text-xs text-foreground">
+                    {originalSeoDescription || "No meta description available"}
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Pending SEO Title
+                  </p>
+                  <p className="mt-1 text-xs text-foreground">
+                    {pendingSeoTitle || "No pending SEO title"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Pending Meta Description
+                  </p>
+                  <p className="mt-1 text-xs text-foreground">
+                    {pendingSeoDescription || "No pending meta description"}
+                  </p>
+                </div>
+              </div>
+            </div>
             <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4 overflow-hidden">
               <div className="flex flex-col min-h-0 overflow-hidden">
                 <h3 className="font-semibold mb-2 flex-shrink-0">
@@ -1606,6 +1976,7 @@ export default function ProductsPage() {
                 </div>
               </div>
             </div>
+
             <div className="flex justify-end gap-2 mt-4 pt-4 border-t flex-shrink-0">
               <Button
                 variant="outline"
@@ -1822,41 +2193,27 @@ export default function ProductsPage() {
     }
   }, [company, isConnected]);
 
-  // Add debug log for progress bar render
+  // Progress bar for active loading
   const renderProgressBar = () => {
-    console.log("Rendering progress bar:", {
-      isConnected,
-      hasMore,
-      isLoadingMore,
-      progress,
-      progressPercentage: progress ? Math.round(progress.percentage) : 0,
-    });
-
-    if (isConnected && (hasMore || isLoadingMore) && progress) {
+    if (isConnected && isLoadingMore && progress && progress.percentage < 100) {
       return (
-        <div className="mb-6 bg-muted p-4 rounded-md">
+        <div className="mb-4 bg-muted p-3 rounded-md border">
           <div className="flex justify-between mb-2">
             <span className="text-sm font-medium">
-              Loading Products: {progress.current} of {progress.total} (
-              {!isNaN(progress.percentage)
-                ? Math.round(progress.percentage)
-                : 0}
-              %)
+              Loading Products: {progress.current.toLocaleString()} of{" "}
+              {progress.total.toLocaleString()} (
+              {Math.round(progress.percentage)}%)
             </span>
-            {isLoadingMore && (
-              <span className="text-sm flex items-center">
-                <span className="animate-spin mr-2">⟳</span>
-                Loading in background...
-              </span>
-            )}
+            <span className="text-sm flex items-center">
+              <span className="animate-spin mr-2">⟳</span>
+              Loading batch...
+            </span>
           </div>
-          <div className="w-full bg-muted-foreground/20 rounded-full h-2.5">
+          <div className="w-full bg-muted-foreground/20 rounded-full h-2">
             <div
-              className="bg-primary h-2.5 rounded-full transition-all duration-300"
+              className="bg-primary h-2 rounded-full transition-all duration-500"
               style={{
-                width: `${
-                  !isNaN(progress.percentage) ? progress.percentage : 0
-                }%`,
+                width: `${Math.min(100, progress.percentage)}%`,
               }}
             ></div>
           </div>
@@ -1902,12 +2259,163 @@ export default function ProductsPage() {
     </>
   );
 
+  // Optimized product row component
+  const ProductRow = React.memo(function ProductRow({
+    product,
+  }: {
+    product: ShopifyProduct;
+  }) {
+    return (
+      <TableRow
+        key={product.id}
+        className={cn(
+          pendingDescriptions[product.id] && "bg-muted/30",
+          publishedProducts.has(String(product.id)) && "bg-green-50"
+        )}
+      >
+        <TableCell>
+          <Checkbox
+            checked={selectedProducts.has(product.id)}
+            onCheckedChange={() => toggleProductSelection(product.id)}
+          />
+        </TableCell>
+        <TableCell>
+          {product.images?.[0]?.src ? (
+            <img
+              src={product.images[0].src}
+              alt={product.title}
+              className="w-[80px] h-[80px] object-cover rounded-md"
+              loading="lazy"
+            />
+          ) : (
+            <div className="w-[80px] h-[80px] bg-muted flex items-center justify-center rounded-md text-xs text-muted-foreground">
+              No image
+            </div>
+          )}
+        </TableCell>
+        <TableCell className="font-medium">
+          <div className="flex flex-col gap-2">
+            <span>{product.title}</span>
+            <div className="flex flex-wrap gap-2">
+              {pendingDescriptions[product.id] && (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-fit">
+                  Pending Changes
+                </span>
+              )}
+              {publishedProducts.has(String(product.id)) && (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 w-fit">
+                  Published{" "}
+                  {product.publishedAt
+                    ? `(${new Date(product.publishedAt).toLocaleString()})`
+                    : ""}
+                </span>
+              )}
+            </div>
+          </div>
+        </TableCell>
+        <TableCell className="max-w-[400px]">
+          <div className="max-h-[200px] overflow-y-auto prose prose-sm">
+            {pendingDescriptions[product.id] ? (
+              <div className="relative">
+                <div className="absolute right-0 top-0 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
+                  Original
+                </div>
+                {renderHTML(pendingDescriptions[product.id].oldDescription)}
+              </div>
+            ) : product.body_html ? (
+              renderHTML(product.body_html)
+            ) : (
+              <span className="text-gray-500 italic">
+                No description available
+              </span>
+            )}
+          </div>
+        </TableCell>
+        <TableCell>
+          <span
+            className={cn(
+              "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
+              product.status === "active"
+                ? "bg-green-100 text-green-800"
+                : product.status === "draft"
+                ? "bg-yellow-100 text-yellow-800"
+                : "bg-gray-100 text-gray-800"
+            )}
+          >
+            {product.status}
+          </span>
+        </TableCell>
+        <TableCell className="text-right">
+          {pendingDescriptions[product.id] ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setSelectedProduct(product);
+                setIsCompareOpen(true);
+              }}
+            >
+              View Changes
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => generateAndSavePendingDescription(product)}
+              disabled={isGenerating[product.id] || isBulkGenerating}
+              className={isGenerating[product.id] ? "animate-pulse" : ""}
+            >
+              {isGenerating[product.id] ? (
+                <>
+                  <span className="animate-spin mr-2">⟳</span>
+                  Generating...
+                </>
+              ) : isBulkGenerating ? (
+                "Bulk Generating..."
+              ) : (
+                "Generate Description"
+              )}
+            </Button>
+          )}
+        </TableCell>
+      </TableRow>
+    );
+  });
+
   return (
     <div className="container mx-auto py-10 min-h-screen flex flex-col">
       <h1 className="text-3xl font-bold mb-8">Shopify Products</h1>
 
       {/* Replace the progress bar section with the new render function */}
       {renderProgressBar()}
+
+      {/* Loading Statistics */}
+      {isConnected && progress && (
+        <div className="mb-4 p-3 bg-muted/50 rounded-md border">
+          <div className="flex justify-between items-center text-sm">
+            <div className="flex items-center gap-4">
+              <span>
+                <strong>Loaded:</strong> {loadedProductsCount.toLocaleString()}{" "}
+                of {progress.total.toLocaleString()} products
+              </span>
+              <span>
+                <strong>Progress:</strong> {Math.round(progress.percentage)}%
+              </span>
+              <span>
+                <strong>Displayed:</strong>{" "}
+                {filteredProducts.length.toLocaleString()} (after filters)
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {hasMore && (
+                <span className="text-muted-foreground">
+                  {autoLoadEnabled ? "Auto-loading enabled" : "Manual loading"}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {!isConnected ? (
         <Card>
@@ -1967,7 +2475,23 @@ export default function ProductsPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <Button
-                  onClick={() => fetchProducts(company)}
+                  onClick={() => {
+                    // Clear cache and reload
+                    setProducts([]);
+                    setFilteredProducts([]);
+                    setCurrentCursor(null);
+                    setHasMore(true);
+                    setLoadedProductsCount(0);
+                    setProgress(null);
+                    const queryParams = new URLSearchParams({
+                      company,
+                      pageSize: "250",
+                      bypassCache: "true",
+                    });
+                    fetch(`/api/platform/shopify/products?${queryParams}`)
+                      .then(() => fetchProducts(company))
+                      .catch(console.error);
+                  }}
                   variant="secondary"
                 >
                   Refresh Products
@@ -2038,6 +2562,40 @@ export default function ProductsPage() {
                     <span className="font-medium">{currentStoreName}</span>
                   </span>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="auto-load" className="cursor-pointer text-sm">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="auto-load"
+                        checked={autoLoadEnabled}
+                        onCheckedChange={(checked) =>
+                          setAutoLoadEnabled(checked as boolean)
+                        }
+                      />
+                      <span>Auto-load products</span>
+                    </div>
+                  </Label>
+                  {hasMore && !autoLoadEnabled && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => loadMoreProducts()}
+                      disabled={isLoadingMore}
+                    >
+                      {isLoadingMore ? (
+                        <>
+                          <span className="animate-spin mr-2">⟳</span>
+                          Loading...
+                        </>
+                      ) : (
+                        `Load More (${Math.min(
+                          250,
+                          (progress?.total || 0) - loadedProductsCount
+                        )} remaining)`
+                      )}
+                    </Button>
+                  )}
+                </div>
                 <Button variant="outline" onClick={openSettingsDialog}>
                   Shopify Settings
                 </Button>
@@ -2080,117 +2638,7 @@ export default function ProductsPage() {
                     <TableSkeleton />
                   ) : (
                     getCurrentPageItems().map((product) => (
-                      <TableRow
-                        key={product.id}
-                        className={cn(
-                          pendingDescriptions[product.id] && "bg-muted/30",
-                          publishedProducts.has(String(product.id)) &&
-                            "bg-green-50"
-                        )}
-                      >
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedProducts.has(product.id)}
-                            onCheckedChange={() =>
-                              toggleProductSelection(product.id)
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {product.images[0] && (
-                            <img
-                              src={product.images[0].src}
-                              alt={product.title}
-                              className="w-[80px] h-[80px] object-cover rounded-md"
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          <div className="flex flex-col gap-2">
-                            <span>{product.title}</span>
-                            <div className="flex flex-wrap gap-2">
-                              {pendingDescriptions[product.id] && (
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-fit">
-                                  Pending Changes
-                                </span>
-                              )}
-                              {publishedProducts.has(String(product.id)) && (
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 w-fit">
-                                  Published{" "}
-                                  {product.publishedAt
-                                    ? `(${new Date(
-                                        product.publishedAt
-                                      ).toLocaleString()})`
-                                    : ""}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-[400px]">
-                          <div className="max-h-[200px] overflow-y-auto prose prose-sm">
-                            {pendingDescriptions[product.id] ? (
-                              <div className="relative">
-                                <div className="absolute right-0 top-0 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
-                                  Original
-                                </div>
-                                {renderHTML(
-                                  pendingDescriptions[product.id].oldDescription
-                                )}
-                              </div>
-                            ) : product.body_html ? (
-                              renderHTML(product.body_html)
-                            ) : (
-                              <span className="text-gray-500 italic">
-                                No description available
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            className={cn(
-                              "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                              product.status === "active"
-                                ? "bg-green-100 text-green-800"
-                                : product.status === "draft"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-gray-100 text-gray-800"
-                            )}
-                          >
-                            {product.status}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {pendingDescriptions[product.id] ? (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedProduct(product);
-                                setIsCompareOpen(true);
-                              }}
-                            >
-                              View Changes
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() =>
-                                generateAndSavePendingDescription(product)
-                              }
-                              disabled={
-                                isGenerating[product.id] || isBulkGenerating
-                              }
-                            >
-                              {isGenerating[product.id] || isBulkGenerating
-                                ? "Generating..."
-                                : "Generate Description"}
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
+                      <ProductRow key={product.id} product={product} />
                     ))
                   )}
                 </TableBody>
@@ -2330,11 +2778,29 @@ export default function ProductsPage() {
                       <SelectItem value="25">25</SelectItem>
                       <SelectItem value="50">50</SelectItem>
                       <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="250">250</SelectItem>
                     </SelectContent>
                   </Select>
                   <span className="text-sm text-muted-foreground">
                     per page
                   </span>
+                  <div className="flex items-center gap-2 ml-4">
+                    <Label
+                      htmlFor="virtualized"
+                      className="cursor-pointer text-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="virtualized"
+                          checked={virtualizedView}
+                          onCheckedChange={(checked) =>
+                            setVirtualizedView(checked as boolean)
+                          }
+                        />
+                        <span>High-performance view</span>
+                      </div>
+                    </Label>
+                  </div>
                 </div>
               </div>
             )}
@@ -2343,7 +2809,31 @@ export default function ProductsPage() {
             {isLoading && (
               <div className="flex justify-center items-center p-4 border-t">
                 <div className="animate-spin mr-2">⟳</div>
-                <span>Loading products...</span>
+                <span>Loading initial products...</span>
+              </div>
+            )}
+
+            {/* Load more section */}
+            {!isLoading && hasMore && !autoLoadEnabled && (
+              <div className="flex justify-center items-center p-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => loadMoreProducts()}
+                  disabled={isLoadingMore}
+                  className="min-w-[200px]"
+                >
+                  {isLoadingMore ? (
+                    <>
+                      <span className="animate-spin mr-2">⟳</span>
+                      Loading more...
+                    </>
+                  ) : (
+                    `Load Next ${Math.min(
+                      250,
+                      (progress?.total || 0) - loadedProductsCount
+                    )} Products`
+                  )}
+                </Button>
               </div>
             )}
 
@@ -2420,15 +2910,18 @@ export default function ProductsPage() {
 
       {/* Settings Dialog */}
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Shopify Connection Settings</DialogTitle>
-            <DialogDescription>
-              Update your Shopify store connection details.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="bg-muted p-4 rounded-md mb-4">
+        <DialogContent className="sm:max-w-[560px] max-h-[85vh] p-0 flex flex-col">
+          <div className="px-6 pt-6 pb-4 border-b">
+            <DialogHeader className="space-y-2">
+              <DialogTitle>Shopify Connection Settings</DialogTitle>
+              <DialogDescription>
+                Update your Shopify store connection details.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+            <div className="bg-muted p-4 rounded-md">
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-3 h-3 rounded-full bg-green-500"></div>
                 <span className="font-medium">Currently Connected</span>
@@ -2445,7 +2938,6 @@ export default function ProductsPage() {
                 value={storeName}
                 onChange={(e) => {
                   let value = e.target.value;
-                  // Remove https:// or http:// if present
                   value = value.replace(/^https?:\/\//, "");
                   setStoreName(value);
                   validateStoreName(value);
@@ -2474,8 +2966,154 @@ export default function ProductsPage() {
                 keep your current token.
               </p>
             </div>
+
+            <div className="space-y-4 border rounded-md p-4 bg-muted/40">
+              <div>
+                <h3 className="text-sm font-medium">Description Destination</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Choose where newly generated descriptions should be stored in
+                  Shopify.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <Button
+                  type="button"
+                  variant={
+                    descriptionPlacement.mode === "body_html"
+                      ? "secondary"
+                      : "outline"
+                  }
+                  className="justify-start h-auto p-4 text-left whitespace-normal"
+                  onClick={() =>
+                    setDescriptionPlacement({
+                      ...defaultDescriptionPlacement,
+                      mode: "body_html",
+                    })
+                  }
+                >
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">Product Description</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Update Shopify's main product description (`body_html`).
+                      Recommended when your theme reads the default description.
+                    </p>
+                  </div>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant={
+                    descriptionPlacement.mode === "metafield"
+                      ? "secondary"
+                      : "outline"
+                  }
+                  className="justify-start h-auto p-4 text-left whitespace-normal"
+                  onClick={() =>
+                    setDescriptionPlacement((prev) => ({
+                      ...prev,
+                      mode: "metafield",
+                    }))
+                  }
+                >
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">Metafield</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Store descriptions in a custom metafield. Make sure your
+                      theme references this metafield to display the copy.
+                    </p>
+                  </div>
+                </Button>
+              </div>
+
+              {descriptionPlacement.mode === "metafield" && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="metafieldNamespace">Namespace</Label>
+                    <Input
+                      id="metafieldNamespace"
+                      placeholder="e.g. custom"
+                      value={descriptionPlacement.metafieldNamespace}
+                      onChange={(event) =>
+                        setDescriptionPlacement((prev) => ({
+                          ...prev,
+                          metafieldNamespace: event.target.value,
+                        }))
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Namespaces group metafields. Avoid Shopify reserved
+                      namespaces.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="metafieldKey">Key</Label>
+                    <Input
+                      id="metafieldKey"
+                      placeholder="e.g. product_description"
+                      value={descriptionPlacement.metafieldKey}
+                      onChange={(event) =>
+                        setDescriptionPlacement((prev) => ({
+                          ...prev,
+                          metafieldKey: event.target.value,
+                        }))
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Use lowercase letters, numbers, or underscores.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="metafieldType">Metafield Type</Label>
+                    <Select
+                      value={descriptionPlacement.metafieldType}
+                      onValueChange={(value: string) =>
+                        setDescriptionPlacement((prev) => ({
+                          ...prev,
+                          metafieldType: value as MetafieldTypeOption,
+                        }))
+                      }
+                    >
+                      <SelectTrigger id="metafieldType" className="w-full">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="single_line_text_field">
+                          Single line text
+                        </SelectItem>
+                        <SelectItem value="multi_line_text_field">
+                          Multi line text
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Sync SEO Fields</Label>
+              <div className="flex items-start justify-between rounded-md border bg-background px-4 py-3 gap-4">
+                <div className="space-y-1 pr-4">
+                  <p className="text-sm font-medium leading-tight">
+                    Publish page title and meta description
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    When enabled, publishing updates the product's SEO title and
+                    meta description in Shopify.
+                  </p>
+                </div>
+                <Switch
+                  checked={syncSeoFields}
+                  onCheckedChange={(value) => setSyncSeoFields(Boolean(value))}
+                />
+              </div>
+            </div>
           </div>
-          <DialogFooter className="flex justify-between items-center">
+
+          <DialogFooter className="px-6 py-4 border-t flex justify-between items-center">
             <Button
               variant="destructive"
               onClick={() => setIsDisconnectConfirmOpen(true)}

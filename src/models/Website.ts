@@ -1,5 +1,19 @@
 import mongoose, { model, models } from "mongoose";
 
+export type DescriptionPlacementMode = "body_html" | "metafield";
+
+export type MetafieldTypeOption =
+  | "single_line_text_field"
+  | "multi_line_text_field"
+  | "rich_text_field";
+
+export interface DescriptionPlacementConfig {
+  mode: DescriptionPlacementMode;
+  metafieldNamespace?: string;
+  metafieldKey?: string;
+  metafieldType?: MetafieldTypeOption;
+}
+
 export interface PlatformConfig {
   platform: "wordpress" | "shopify" | "searchconsole";
   enabled: boolean;
@@ -45,6 +59,8 @@ export interface PlatformConfig {
         volume?: number;
       }>;
     };
+    descriptionPlacement?: DescriptionPlacementConfig;
+    syncSeoFields?: boolean;
   };
 }
 
@@ -80,6 +96,11 @@ export interface IWebsite extends mongoose.Document {
     oldDescription: string;
     newDescription: string;
     generatedAt: string;
+    oldSeoTitle?: string;
+    oldSeoDescription?: string;
+    newSeoTitle?: string;
+    newSeoDescription?: string;
+    summaryHtml?: string;
   }>;
   publishedProducts: Array<{
     productId: string;
@@ -141,6 +162,11 @@ const websiteSchema = new mongoose.Schema({
       oldDescription: { type: String, default: "" },
       newDescription: { type: String, required: true },
       generatedAt: { type: String, required: true },
+      oldSeoTitle: { type: String, default: "" },
+      oldSeoDescription: { type: String, default: "" },
+      newSeoTitle: { type: String, default: "" },
+      newSeoDescription: { type: String, default: "" },
+      summaryHtml: { type: String, default: "" },
     },
   ],
   publishedProducts: [
@@ -235,6 +261,20 @@ const websiteSchema = new mongoose.Schema({
               },
             ],
           },
+          descriptionPlacement: {
+            mode: {
+              type: String,
+              enum: ["body_html", "metafield"],
+              default: "body_html",
+            },
+            metafieldNamespace: { type: String, default: "" },
+            metafieldKey: { type: String, default: "" },
+            metafieldType: {
+              type: String,
+              enum: ["single_line_text_field", "multi_line_text_field"],
+            },
+          },
+          syncSeoFields: { type: Boolean, default: false },
         },
         { _id: false }
       ),

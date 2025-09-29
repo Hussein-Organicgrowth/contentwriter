@@ -4,40 +4,90 @@ import { Website } from "@/models/Website";
 
 export async function POST(req: Request) {
   try {
-    const { productId, oldDescription, newDescription, company } =
-      await req.json();
+    console.log("Received POST request to save pending description");
+
+    const requestBody = await req.json();
+    console.log("Request body:", requestBody);
+
+    const {
+      productId,
+      oldDescription,
+      newDescription,
+      company,
+      oldSeoTitle,
+      oldSeoDescription,
+      newSeoTitle,
+      newSeoDescription,
+      summaryHtml,
+    } = requestBody;
 
     if (!productId || !company || !newDescription) {
+      console.error("Missing required fields:", {
+        productId: !!productId,
+        company: !!company,
+        newDescription: !!newDescription,
+      });
       return NextResponse.json(
-        { error: "Missing required fields" },
+        {
+          error:
+            "Missing required fields: productId, company, and newDescription are required",
+        },
         { status: 400 }
       );
     }
 
+    console.log(
+      `Saving pending description for product ${productId} in company ${company}`
+    );
+
+    console.log("Connecting to database...");
     await connectToDatabase();
+    console.log("Database connected successfully");
 
     const website = await Website.findOne({ name: company });
     if (!website) {
+      console.error(`Website not found for company: ${company}`);
       return NextResponse.json({ error: "Website not found" }, { status: 404 });
     }
 
+    console.log(`Found website for company: ${company}`);
+
     // Remove any existing pending description for this product
-    website.pendingProductDescriptions =
-      website.pendingProductDescriptions.filter(
-        (desc: { productId: string }) => desc.productId !== productId
-      );
+    const existingCount = website.pendingProductDescriptions?.length || 0;
+    website.pendingProductDescriptions = (
+      website.pendingProductDescriptions || []
+    ).filter((desc: { productId: string }) => desc.productId !== productId);
+    const afterFilterCount = website.pendingProductDescriptions.length;
+    console.log(
+      `Filtered existing descriptions: ${existingCount} -> ${afterFilterCount}`
+    );
 
     // Add the new pending description
-    website.pendingProductDescriptions.push({
+    const newPendingDescription = {
       productId,
       oldDescription: oldDescription || "",
       newDescription,
       generatedAt: new Date().toISOString(),
-    });
+      oldSeoTitle: oldSeoTitle || "",
+      oldSeoDescription: oldSeoDescription || "",
+      newSeoTitle: newSeoTitle || "",
+      newSeoDescription: newSeoDescription || "",
+      summaryHtml: summaryHtml || "",
+    };
 
+    console.log("Adding new pending description:", newPendingDescription);
+    website.pendingProductDescriptions.push(newPendingDescription);
+
+    console.log("Saving website to database...");
     await website.save();
+    console.log("Website saved successfully");
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      message: "Pending description saved successfully",
+      productId,
+      totalPending: website.pendingProductDescriptions.length,
+    });
   } catch (error) {
     console.error("Error saving pending description:", error);
     return NextResponse.json(
