@@ -132,7 +132,10 @@ type CountryType =
 
 type DescriptionPlacementMode = "body_html" | "metafield";
 
-type MetafieldTypeOption = "single_line_text_field" | "multi_line_text_field";
+type MetafieldTypeOption =
+  | "single_line_text_field"
+  | "multi_line_text_field"
+  | "rich_text_editor";
 
 interface DescriptionPlacementSettings {
   mode: DescriptionPlacementMode;
@@ -161,6 +164,8 @@ const normalizeDescriptionPlacement = (
     const type: MetafieldTypeOption =
       raw.metafieldType === "single_line_text_field"
         ? "single_line_text_field"
+        : raw.metafieldType === "rich_text_editor"
+        ? "rich_text_editor"
         : "multi_line_text_field";
 
     if (!namespace || !key) {
@@ -234,6 +239,7 @@ export default function ProductsPage() {
   const [isCompareOpen, setIsCompareOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showPendingOnly, setShowPendingOnly] = useState(false);
+  const [showNoPendingOnly, setShowNoPendingOnly] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
@@ -318,6 +324,7 @@ export default function ProductsPage() {
     products,
     searchQuery,
     showPendingOnly,
+    showNoPendingOnly,
     showPublishedOnly,
     pendingDescriptions,
     publishedProducts,
@@ -340,6 +347,7 @@ export default function ProductsPage() {
       selectedStatus,
       searchQuery,
       showPendingOnly,
+      showNoPendingOnly,
       showPublishedOnly,
       pendingDescriptionsCount: Object.keys(pendingDescriptions).length,
       publishedProductsCount: publishedProducts.size,
@@ -350,6 +358,11 @@ export default function ProductsPage() {
     // Filter by pending status if enabled
     if (showPendingOnly) {
       filtered = filtered.filter((product) => pendingDescriptions[product.id]);
+    }
+
+    // Filter by NO pending status if enabled (products that need content)
+    if (showNoPendingOnly) {
+      filtered = filtered.filter((product) => !pendingDescriptions[product.id]);
     }
 
     // Filter by published status if enabled
@@ -836,7 +849,10 @@ export default function ProductsPage() {
     }
   }, [isCompareOpen, hasMore, autoLoadEnabled]);
 
-  const loadMoreProducts = (cursor?: string | null) => {
+  const loadMoreProducts = (
+    cursor?: string | null,
+    isManual: boolean = false
+  ) => {
     const currentCompany = localStorage.getItem("company");
     console.log("loadMoreProducts called with state:", {
       company: currentCompany,
@@ -844,9 +860,11 @@ export default function ProductsPage() {
       isLoadingMore,
       hasMore,
       isCompareOpen: isCompareOpenRef.current,
+      isManual,
     });
 
-    if (isCompareOpenRef.current || !autoLoadEnabled) {
+    // Only check autoLoadEnabled for automatic triggers
+    if (isCompareOpenRef.current || (!autoLoadEnabled && !isManual)) {
       if (cursor) {
         nextCursorRef.current = cursor;
       }
@@ -1042,6 +1060,7 @@ ${newDescription}`
       return;
     }
 
+    const CONCURRENT_LIMIT = 3; // Process 3 products at a time for optimal speed
     setIsBulkGenerating(true);
     setBulkProgress({ current: 0, total: selectedProducts.size });
     let successCount = 0;
@@ -1053,6 +1072,10 @@ ${newDescription}`
         selectedProducts.has(p.id)
       );
 
+      console.log(
+        `[Bulk Generate] Starting generation for ${selectedProductsList.length} products with concurrency ${CONCURRENT_LIMIT}`
+      );
+
       // Set all selected products to generating state
       const newGeneratingState = { ...isGenerating };
       selectedProductsList.forEach((product) => {
@@ -1060,8 +1083,11 @@ ${newDescription}`
       });
       setIsGenerating(newGeneratingState);
 
-      for (const product of selectedProductsList) {
+      // Process products in batches for parallel execution
+      const processProduct = async (product: ShopifyProduct, index: number) => {
         try {
+          console.log(`[Bulk Generate] Generating for: ${product.title}`);
+
           // Generate new description with unique parameters
           const generateResponse = await fetch("/api/generate/description", {
             method: "POST",
@@ -1076,13 +1102,15 @@ ${newDescription}`
               language: selectedLanguage,
               targetCountry: selectedCountry,
               timestamp: new Date().getTime(),
-              productIndex: successCount + failCount,
+              productIndex: index,
               keyword: product.title,
             }),
           });
 
           if (!generateResponse.ok) {
-            throw new Error("Failed to generate description");
+            throw new Error(
+              `Failed to generate description: ${generateResponse.status}`
+            );
           }
 
           const {
@@ -1094,8 +1122,7 @@ ${newDescription}`
 
           const resolvedDescription =
             descriptionPlacement.mode === "metafield" && summaryHtml
-              ? `${summaryHtml}
-${newDescription}`
+              ? `${summaryHtml}\n${newDescription}`
               : newDescription;
 
           const existingPending = updatedPendingDescriptions[product.id];
@@ -1143,22 +1170,43 @@ ${newDescription}`
             summaryHtml: summaryHtml || "",
           };
 
-          successCount++;
-          // Update progress
-          setBulkProgress((prev) => ({
-            ...prev,
-            current: successCount + failCount,
-          }));
-          // Update state after each successful generation
-          setPendingDescriptions({ ...updatedPendingDescriptions });
+          return { success: true, product };
         } catch (error) {
           console.error(`Failed to generate for ${product.title}:`, error);
-          failCount++;
-          setBulkProgress((prev) => ({
-            ...prev,
-            current: successCount + failCount,
-          }));
+          return { success: false, product, error };
         }
+      };
+
+      // Process in batches with concurrency limit
+      for (let i = 0; i < selectedProductsList.length; i += CONCURRENT_LIMIT) {
+        const batch = selectedProductsList.slice(i, i + CONCURRENT_LIMIT);
+        const batchResults = await Promise.allSettled(
+          batch.map((product, idx) => processProduct(product, i + idx))
+        );
+
+        // Process results
+        batchResults.forEach((result) => {
+          if (result.status === "fulfilled" && result.value.success) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        });
+
+        // Update progress
+        setBulkProgress({
+          current: successCount + failCount,
+          total: selectedProducts.size,
+        });
+
+        // Update state after each batch
+        setPendingDescriptions({ ...updatedPendingDescriptions });
+
+        console.log(
+          `[Bulk Generate] Batch ${
+            Math.floor(i / CONCURRENT_LIMIT) + 1
+          } completed: ${successCount} success, ${failCount} failed`
+        );
       }
 
       toast.success(
@@ -1299,8 +1347,9 @@ ${newDescription}`
         );
       }
 
-      fetchPendingDescriptions(company);
-      fetchProducts(company);
+      // Refresh pending descriptions to ensure state is in sync with database
+      // Don't refresh products to avoid UI jumps
+      await fetchPendingDescriptions(company);
 
       toast.success("Product description updated successfully");
     } catch (error) {
@@ -1371,53 +1420,33 @@ ${newDescription}`
     }
   };
 
-  const handleBulkPublish = async () => {
-    const pendingProducts = filteredProducts.filter(
-      (product) => pendingDescriptions[product.id]
-    );
-
-    if (pendingProducts.length === 0) {
-      toast.error("No pending descriptions to publish");
-      return;
-    }
-
-    let successCount = 0;
-    let failCount = 0;
-    const newPublishedProducts = new Set(publishedProducts);
-
-    try {
-      for (const product of pendingProducts) {
-        try {
-          await handlePublish(product);
-          newPublishedProducts.add(product.id);
-          successCount++;
-          toast.success(
-            `Progress: ${successCount + failCount}/${pendingProducts.length}`
-          );
-        } catch (error) {
-          failCount++;
-          console.error(`Failed to publish ${product.title}:`, error);
-        }
-      }
-
-      setPublishedProducts(newPublishedProducts);
-      toast.success(
-        `Completed! Successfully published: ${successCount}, Failed: ${failCount}`
-      );
-    } catch (error) {
-      console.error("Error in bulk publish:", error);
-      toast.error("Failed to complete bulk publish");
-    }
-  };
-
   const handleBulkPublishSelected = async () => {
     const selectedPendingProducts = filteredProducts.filter(
       (product) =>
         selectedProducts.has(product.id) && pendingDescriptions[product.id]
     );
 
+    console.log("[Bulk Publish] Selected products for publishing:", {
+      totalSelected: selectedProducts.size,
+      selectedIds: Array.from(selectedProducts),
+      productsWithPending: selectedPendingProducts.length,
+      productTitles: selectedPendingProducts.map((p) => p.title),
+    });
+
     if (selectedPendingProducts.length === 0) {
-      toast.error("No pending descriptions selected to publish");
+      toast.error(
+        "No products with pending content selected. Generate content first!"
+      );
+      return;
+    }
+
+    // Show confirmation with details
+    const confirmMessage = `You are about to publish ${
+      selectedPendingProducts.length
+    } product${
+      selectedPendingProducts.length !== 1 ? "s" : ""
+    } with pending content. Continue?`;
+    if (!confirm(confirmMessage)) {
       return;
     }
 
@@ -1428,17 +1457,21 @@ ${newDescription}`
     try {
       for (const product of selectedPendingProducts) {
         try {
+          console.log(
+            `[Bulk Publish] Publishing: ${product.title} (${product.id})`
+          );
           await handlePublish(product);
           newPublishedProducts.add(product.id);
           successCount++;
           toast.success(
             `Progress: ${successCount + failCount}/${
               selectedPendingProducts.length
-            }`
+            } - Published: ${product.title}`
           );
         } catch (error) {
           failCount++;
           console.error(`Failed to publish ${product.title}:`, error);
+          toast.error(`Failed: ${product.title}`);
         }
       }
 
@@ -2042,64 +2075,58 @@ ${newDescription}`
   };
 
   const LanguageSelector = () => (
-    <div className="flex items-center gap-2">
-      <Label>Language:</Label>
-      <Select
-        value={selectedLanguage}
-        onValueChange={(value: LanguageType) => setSelectedLanguage(value)}
-      >
-        <SelectTrigger className="w-[180px]">
-          <SelectValue placeholder="Select language" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="en-US">English (US)</SelectItem>
-          <SelectItem value="en-GB">English (UK)</SelectItem>
-          <SelectItem value="es">Spanish</SelectItem>
-          <SelectItem value="fr">French</SelectItem>
-          <SelectItem value="de">German</SelectItem>
-          <SelectItem value="it">Italian</SelectItem>
-          <SelectItem value="pt">Portuguese</SelectItem>
-          <SelectItem value="nl">Dutch</SelectItem>
-          <SelectItem value="pl">Polish</SelectItem>
-          <SelectItem value="sv">Swedish</SelectItem>
-          <SelectItem value="da">Danish</SelectItem>
-          <SelectItem value="no">Norwegian</SelectItem>
-          <SelectItem value="fi">Finnish</SelectItem>
-        </SelectContent>
-      </Select>
-    </div>
+    <Select
+      value={selectedLanguage}
+      onValueChange={(value: LanguageType) => setSelectedLanguage(value)}
+    >
+      <SelectTrigger className="w-[140px] h-8">
+        <SelectValue placeholder="Language" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="en-US">🇺🇸 English (US)</SelectItem>
+        <SelectItem value="en-GB">🇬🇧 English (UK)</SelectItem>
+        <SelectItem value="es">🇪🇸 Spanish</SelectItem>
+        <SelectItem value="fr">🇫🇷 French</SelectItem>
+        <SelectItem value="de">🇩🇪 German</SelectItem>
+        <SelectItem value="it">🇮🇹 Italian</SelectItem>
+        <SelectItem value="pt">🇵🇹 Portuguese</SelectItem>
+        <SelectItem value="nl">🇳🇱 Dutch</SelectItem>
+        <SelectItem value="pl">🇵🇱 Polish</SelectItem>
+        <SelectItem value="sv">🇸🇪 Swedish</SelectItem>
+        <SelectItem value="da">🇩🇰 Danish</SelectItem>
+        <SelectItem value="no">🇳🇴 Norwegian</SelectItem>
+        <SelectItem value="fi">🇫🇮 Finnish</SelectItem>
+      </SelectContent>
+    </Select>
   );
 
   const CountrySelector = () => (
-    <div className="flex items-center gap-2">
-      <Label>Market:</Label>
-      <Select
-        value={selectedCountry}
-        onValueChange={(value: CountryType) => setSelectedCountry(value)}
-      >
-        <SelectTrigger className="w-[180px]">
-          <SelectValue placeholder="Select market" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="US">United States</SelectItem>
-          <SelectItem value="GB">United Kingdom</SelectItem>
-          <SelectItem value="CA">Canada</SelectItem>
-          <SelectItem value="AU">Australia</SelectItem>
-          <SelectItem value="DE">Germany</SelectItem>
-          <SelectItem value="FR">France</SelectItem>
-          <SelectItem value="ES">Spain</SelectItem>
-          <SelectItem value="IT">Italy</SelectItem>
-          <SelectItem value="NL">Netherlands</SelectItem>
-          <SelectItem value="SE">Sweden</SelectItem>
-          <SelectItem value="NO">Norway</SelectItem>
-          <SelectItem value="DK">Denmark</SelectItem>
-          <SelectItem value="FI">Finland</SelectItem>
-          <SelectItem value="PL">Poland</SelectItem>
-          <SelectItem value="BR">Brazil</SelectItem>
-          <SelectItem value="MX">Mexico</SelectItem>
-        </SelectContent>
-      </Select>
-    </div>
+    <Select
+      value={selectedCountry}
+      onValueChange={(value: CountryType) => setSelectedCountry(value)}
+    >
+      <SelectTrigger className="w-[140px] h-8">
+        <SelectValue placeholder="Market" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="US">🇺🇸 USA</SelectItem>
+        <SelectItem value="GB">🇬🇧 UK</SelectItem>
+        <SelectItem value="CA">🇨🇦 Canada</SelectItem>
+        <SelectItem value="AU">🇦🇺 Australia</SelectItem>
+        <SelectItem value="DE">🇩🇪 Germany</SelectItem>
+        <SelectItem value="FR">🇫🇷 France</SelectItem>
+        <SelectItem value="ES">🇪🇸 Spain</SelectItem>
+        <SelectItem value="IT">🇮🇹 Italy</SelectItem>
+        <SelectItem value="NL">🇳🇱 Netherlands</SelectItem>
+        <SelectItem value="SE">🇸🇪 Sweden</SelectItem>
+        <SelectItem value="NO">🇳🇴 Norway</SelectItem>
+        <SelectItem value="DK">🇩🇰 Denmark</SelectItem>
+        <SelectItem value="FI">🇫🇮 Finland</SelectItem>
+        <SelectItem value="PL">🇵🇱 Poland</SelectItem>
+        <SelectItem value="BR">🇧🇷 Brazil</SelectItem>
+        <SelectItem value="MX">🇲🇽 Mexico</SelectItem>
+      </SelectContent>
+    </Select>
   );
 
   const handleDisconnect = async () => {
@@ -2195,31 +2222,6 @@ ${newDescription}`
 
   // Progress bar for active loading
   const renderProgressBar = () => {
-    if (isConnected && isLoadingMore && progress && progress.percentage < 100) {
-      return (
-        <div className="mb-4 bg-muted p-3 rounded-md border">
-          <div className="flex justify-between mb-2">
-            <span className="text-sm font-medium">
-              Loading Products: {progress.current.toLocaleString()} of{" "}
-              {progress.total.toLocaleString()} (
-              {Math.round(progress.percentage)}%)
-            </span>
-            <span className="text-sm flex items-center">
-              <span className="animate-spin mr-2">⟳</span>
-              Loading batch...
-            </span>
-          </div>
-          <div className="w-full bg-muted-foreground/20 rounded-full h-2">
-            <div
-              className="bg-primary h-2 rounded-full transition-all duration-500"
-              style={{
-                width: `${Math.min(100, progress.percentage)}%`,
-              }}
-            ></div>
-          </div>
-        </div>
-      );
-    }
     return null;
   };
 
@@ -2470,145 +2472,224 @@ ${newDescription}`
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-6 flex-1 flex flex-col">
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <Button
-                  onClick={() => {
-                    // Clear cache and reload
-                    setProducts([]);
-                    setFilteredProducts([]);
-                    setCurrentCursor(null);
-                    setHasMore(true);
-                    setLoadedProductsCount(0);
-                    setProgress(null);
-                    const queryParams = new URLSearchParams({
-                      company,
-                      pageSize: "250",
-                      bypassCache: "true",
-                    });
-                    fetch(`/api/platform/shopify/products?${queryParams}`)
-                      .then(() => fetchProducts(company))
-                      .catch(console.error);
-                  }}
-                  variant="secondary"
-                >
-                  Refresh Products
-                </Button>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="search">Search:</Label>
-                  <Input
-                    id="search"
-                    placeholder="Search products..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-[250px]"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="status-filter">Status:</Label>
+        <div className="space-y-4 flex-1 flex flex-col">
+          {/* Header Row - Store Info & Actions */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-md">
+                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                <span className="text-sm font-medium text-green-900 dark:text-green-100">
+                  {currentStoreName}
+                </span>
+              </div>
+              <Button
+                onClick={() => {
+                  // Clear cache and reload
+                  setProducts([]);
+                  setFilteredProducts([]);
+                  setCurrentCursor(null);
+                  setHasMore(true);
+                  setLoadedProductsCount(0);
+                  setProgress(null);
+                  const queryParams = new URLSearchParams({
+                    company,
+                    pageSize: "250",
+                    bypassCache: "true",
+                  });
+                  fetch(`/api/platform/shopify/products?${queryParams}`)
+                    .then(() => fetchProducts(company))
+                    .catch(console.error);
+                }}
+                variant="outline"
+                size="sm"
+              >
+                ⟳ Refresh
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={openSettingsDialog}>
+                ⚙️ Settings
+              </Button>
+            </div>
+          </div>
+
+          {/* Search & Filters Card */}
+          <Card>
+            <CardContent className="pt-6">
+              <div className="space-y-4">
+                {/* Search & Status Row */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <Input
+                      id="search"
+                      placeholder="🔍 Search products..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
                   <Select
                     value={selectedStatus}
                     onValueChange={(value: StatusType) =>
                       setSelectedStatus(value)
                     }
                   >
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Select status" />
+                    <SelectTrigger className="w-[160px] h-9">
+                      <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Products</SelectItem>
+                      <SelectItem value="all">All Status</SelectItem>
                       <SelectItem value="active">Active</SelectItem>
                       <SelectItem value="draft">Draft</SelectItem>
                       <SelectItem value="archived">Archived</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="pending-filter" className="cursor-pointer">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="pending-filter"
-                        checked={showPendingOnly}
-                        onCheckedChange={(checked) =>
-                          setShowPendingOnly(checked as boolean)
-                        }
-                      />
-                      <span>Show Pending Only</span>
-                    </div>
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="published-filter" className="cursor-pointer">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="published-filter"
-                        checked={showPublishedOnly}
-                        onCheckedChange={(checked) =>
-                          setShowPublishedOnly(checked as boolean)
-                        }
-                      />
-                      <span>Show Published Only</span>
-                    </div>
-                  </Label>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-sm text-muted-foreground flex items-center gap-2 mr-2">
-                  <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                  <span>
-                    Connected to:{" "}
-                    <span className="font-medium">{currentStoreName}</span>
+
+                {/* Filter Chips Row */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm text-muted-foreground">
+                    Filters:
                   </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="auto-load" className="cursor-pointer text-sm">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="auto-load"
-                        checked={autoLoadEnabled}
-                        onCheckedChange={(checked) =>
-                          setAutoLoadEnabled(checked as boolean)
-                        }
-                      />
-                      <span>Auto-load products</span>
-                    </div>
-                  </Label>
+                  <Button
+                    variant={showPendingOnly ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      setShowPendingOnly(!showPendingOnly);
+                      if (!showPendingOnly) setShowNoPendingOnly(false);
+                    }}
+                    className="h-8"
+                  >
+                    📝 Pending
+                    {showPendingOnly && (
+                      <span className="ml-1.5 text-xs">✓</span>
+                    )}
+                  </Button>
+                  <Button
+                    variant={showNoPendingOnly ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      setShowNoPendingOnly(!showNoPendingOnly);
+                      if (!showNoPendingOnly) {
+                        setShowPendingOnly(false);
+                        setShowPublishedOnly(false); // Can't show published when showing needs content
+                      }
+                    }}
+                    className="h-8"
+                  >
+                    ✨ Needs Content
+                    {showNoPendingOnly && (
+                      <span className="ml-1.5 text-xs">✓</span>
+                    )}
+                  </Button>
+                  <Button
+                    variant={showPublishedOnly ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      setShowPublishedOnly(!showPublishedOnly);
+                      if (!showPublishedOnly) {
+                        setShowNoPendingOnly(false); // Can't show needs content when showing published
+                      }
+                    }}
+                    className="h-8"
+                  >
+                    ✅ Published
+                    {showPublishedOnly && (
+                      <span className="ml-1.5 text-xs">✓</span>
+                    )}
+                  </Button>
+
+                  <div className="h-6 w-px bg-border mx-1"></div>
+
+                  <LanguageSelector />
+                  <CountrySelector />
+
+                  <div className="h-6 w-px bg-border mx-1"></div>
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="auto-load"
+                      checked={autoLoadEnabled}
+                      onCheckedChange={(checked) =>
+                        setAutoLoadEnabled(checked as boolean)
+                      }
+                    />
+                    <Label
+                      htmlFor="auto-load"
+                      className="text-sm cursor-pointer"
+                    >
+                      Auto-load
+                    </Label>
+                  </div>
+
                   {hasMore && !autoLoadEnabled && (
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => loadMoreProducts()}
+                      onClick={() => loadMoreProducts(null, true)}
                       disabled={isLoadingMore}
+                      className="h-8"
                     >
                       {isLoadingMore ? (
                         <>
-                          <span className="animate-spin mr-2">⟳</span>
+                          <span className="animate-spin mr-1.5">⟳</span>
                           Loading...
                         </>
                       ) : (
                         `Load More (${Math.min(
                           250,
                           (progress?.total || 0) - loadedProductsCount
-                        )} remaining)`
+                        )})`
                       )}
                     </Button>
                   )}
                 </div>
-                <Button variant="outline" onClick={openSettingsDialog}>
-                  Shopify Settings
-                </Button>
+
+                {/* Active Filters Display */}
+                {(showPendingOnly ||
+                  showNoPendingOnly ||
+                  showPublishedOnly ||
+                  selectedStatus !== "all") && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">Active:</span>
+                    {selectedStatus !== "all" && (
+                      <span className="px-2 py-1 bg-muted rounded text-xs">
+                        Status: {selectedStatus}
+                      </span>
+                    )}
+                    {showPendingOnly && (
+                      <span className="px-2 py-1 bg-muted rounded text-xs">
+                        Pending Only
+                      </span>
+                    )}
+                    {showNoPendingOnly && (
+                      <span className="px-2 py-1 bg-muted rounded text-xs">
+                        Needs Content
+                      </span>
+                    )}
+                    {showPublishedOnly && (
+                      <span className="px-2 py-1 bg-muted rounded text-xs">
+                        Published Only
+                      </span>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setShowPendingOnly(false);
+                        setShowNoPendingOnly(false);
+                        setShowPublishedOnly(false);
+                        setSelectedStatus("all");
+                      }}
+                      className="h-6 px-2 text-xs"
+                    >
+                      Clear all
+                    </Button>
+                  </div>
+                )}
               </div>
-            </div>
-            <div className="flex items-center gap-4 border-t pt-4">
-              <Label className="text-sm font-medium">
-                Generation Settings:
-              </Label>
-              <LanguageSelector />
-              <CountrySelector />
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
           <div className="rounded-md border flex-1 flex flex-col">
             <div className="flex-1 overflow-auto">
@@ -2818,7 +2899,7 @@ ${newDescription}`
               <div className="flex justify-center items-center p-4 border-t">
                 <Button
                   variant="outline"
-                  onClick={() => loadMoreProducts()}
+                  onClick={() => loadMoreProducts(null, true)}
                   disabled={isLoadingMore}
                   className="min-w-[200px]"
                 >
@@ -2851,59 +2932,85 @@ ${newDescription}`
 
       {/* Update the bulk actions bar to use fixed positioning with proper z-index */}
       {selectedProducts.size > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-background border-t shadow-lg p-4 flex items-center justify-between z-[100]">
-          <div className="text-sm text-muted-foreground">
-            Selected: {selectedProducts.size} of {filteredProducts.length}{" "}
-            products (
-            {
-              filteredProducts.filter(
-                (p) => selectedProducts.has(p.id) && pendingDescriptions[p.id]
-              ).length
-            }{" "}
-            pending)
-            {isBulkGenerating && bulkProgress.total > 0 && (
-              <span className="ml-2">
-                Progress: {bulkProgress.current}/{bulkProgress.total}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              onClick={handleBulkGenerate}
-              disabled={selectedProducts.size === 0 || isBulkGenerating}
-            >
-              {isBulkGenerating ? (
-                <>
-                  <span className="animate-spin mr-2">⟳</span>
-                  Generating... (
-                  {Math.round(
-                    (bulkProgress.current / bulkProgress.total) * 100
-                  )}
-                  %)
-                </>
-              ) : (
-                "Generate Selected"
-              )}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handleBulkPublishSelected}
-              disabled={
-                filteredProducts.filter(
-                  (p) => selectedProducts.has(p.id) && pendingDescriptions[p.id]
-                ).length === 0
-              }
-            >
-              Publish Selected Pending
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handleBulkPublish}
-              disabled={Object.keys(pendingDescriptions).length === 0}
-            >
-              Publish All Pending ({Object.keys(pendingDescriptions).length})
-            </Button>
+        <div className="fixed bottom-0 left-0 right-0 bg-background border-t shadow-lg p-4 z-[100]">
+          <div className="container mx-auto flex items-center justify-between">
+            <div className="flex flex-col gap-1">
+              <div className="text-sm font-medium">
+                {selectedProducts.size} product
+                {selectedProducts.size !== 1 ? "s" : ""} selected
+              </div>
+              <div className="text-xs text-muted-foreground flex items-center gap-3">
+                <span>
+                  {
+                    filteredProducts.filter(
+                      (p) =>
+                        selectedProducts.has(p.id) && pendingDescriptions[p.id]
+                    ).length
+                  }{" "}
+                  with pending content
+                </span>
+                <span>
+                  {
+                    filteredProducts.filter(
+                      (p) =>
+                        selectedProducts.has(p.id) && !pendingDescriptions[p.id]
+                    ).length
+                  }{" "}
+                  without content
+                </span>
+                {isBulkGenerating && bulkProgress.total > 0 && (
+                  <span className="text-blue-600 font-medium">
+                    Generating: {bulkProgress.current}/{bulkProgress.total}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedProducts(new Set())}
+              >
+                Clear Selection
+              </Button>
+              <Button
+                variant="default"
+                onClick={handleBulkGenerate}
+                disabled={selectedProducts.size === 0 || isBulkGenerating}
+              >
+                {isBulkGenerating ? (
+                  <>
+                    <span className="animate-spin mr-2">⟳</span>
+                    Generating... (
+                    {Math.round(
+                      (bulkProgress.current / bulkProgress.total) * 100
+                    )}
+                    %)
+                  </>
+                ) : (
+                  <>✨ Generate Content ({selectedProducts.size})</>
+                )}
+              </Button>
+              <Button
+                variant="default"
+                onClick={handleBulkPublishSelected}
+                disabled={
+                  filteredProducts.filter(
+                    (p) =>
+                      selectedProducts.has(p.id) && pendingDescriptions[p.id]
+                  ).length === 0
+                }
+              >
+                ✅ Publish Selected (
+                {
+                  filteredProducts.filter(
+                    (p) =>
+                      selectedProducts.has(p.id) && pendingDescriptions[p.id]
+                  ).length
+                }
+                )
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -3085,6 +3192,9 @@ ${newDescription}`
                         </SelectItem>
                         <SelectItem value="multi_line_text_field">
                           Multi line text
+                        </SelectItem>
+                        <SelectItem value="rich_text_editor">
+                          Rich text editor
                         </SelectItem>
                       </SelectContent>
                     </Select>

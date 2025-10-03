@@ -5,7 +5,7 @@ export type DescriptionPlacementMode = "body_html" | "metafield";
 export type MetafieldTypeOption =
   | "single_line_text_field"
   | "multi_line_text_field"
-  | "rich_text_field";
+  | "rich_text_editor";
 
 export interface DescriptionPlacementConfig {
   mode: DescriptionPlacementMode;
@@ -271,7 +271,11 @@ const websiteSchema = new mongoose.Schema({
             metafieldKey: { type: String, default: "" },
             metafieldType: {
               type: String,
-              enum: ["single_line_text_field", "multi_line_text_field"],
+              enum: [
+                "single_line_text_field",
+                "multi_line_text_field",
+                "rich_text_editor",
+              ],
             },
           },
           syncSeoFields: { type: Boolean, default: false },

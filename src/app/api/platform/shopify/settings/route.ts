@@ -29,6 +29,8 @@ function sanitizeDescriptionPlacement(
     const type: DescriptionPlacementConfig["metafieldType"] =
       candidate.metafieldType === "single_line_text_field"
         ? "single_line_text_field"
+        : candidate.metafieldType === "rich_text_editor"
+        ? "rich_text_editor"
         : "multi_line_text_field";
 
     if (namespace && key) {
@@ -74,8 +76,13 @@ export async function GET(req: Request) {
       );
     }
 
-    const sanitizedPlacement = sanitizeDescriptionPlacement(
-      shopifyIntegration.settings?.descriptionPlacement
+    const rawPlacement = shopifyIntegration.settings?.descriptionPlacement;
+    const sanitizedPlacement = sanitizeDescriptionPlacement(rawPlacement);
+
+    console.log("[DEBUG] GET settings - Raw from DB:", rawPlacement);
+    console.log(
+      "[DEBUG] GET settings - After sanitization:",
+      sanitizedPlacement
     );
 
     const settings = {
@@ -123,11 +130,14 @@ export async function POST(req: Request) {
     const sanitizedSyncSeo =
       typeof syncSeoFields === "boolean" ? syncSeoFields : false;
 
-    console.log("Received request body:", {
+    console.log("[DEBUG] Received request body:", {
       credentials,
       enabled,
       websiteName,
       keepExistingToken,
+      rawDescriptionPlacement: descriptionPlacement,
+      sanitizedDescriptionPlacement: sanitizedPlacement,
+      syncSeoFields: sanitizedSyncSeo,
     });
 
     if (!websiteName) {
@@ -156,7 +166,7 @@ export async function POST(req: Request) {
     }
 
     if (shopifyIndex >= 0) {
-      const updateFields: any = {
+      const updateFields: Record<string, unknown> = {
         "platformIntegrations.$.platform": "shopify",
         "platformIntegrations.$.enabled": Boolean(enabled),
         "platformIntegrations.$.credentials.storeName":
