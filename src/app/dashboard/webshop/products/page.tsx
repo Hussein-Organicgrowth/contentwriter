@@ -355,9 +355,13 @@ export default function ProductsPage() {
 
     let filtered = products;
 
-    // Filter by pending status if enabled
+    // Filter by pending status if enabled (pending but NOT published)
     if (showPendingOnly) {
-      filtered = filtered.filter((product) => pendingDescriptions[product.id]);
+      filtered = filtered.filter(
+        (product) =>
+          pendingDescriptions[product.id] &&
+          !publishedProducts.has(String(product.id))
+      );
     }
 
     // Filter by NO pending status if enabled (products that need content)
