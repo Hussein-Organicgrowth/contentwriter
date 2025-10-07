@@ -266,6 +266,13 @@ export default function ProductsPage() {
     });
   const [syncSeoFields, setSyncSeoFields] = useState(false);
   const isCompareOpenRef = useRef(false);
+  const [bulkPublishProgress, setBulkPublishProgress] = useState<{
+    isPublishing: boolean;
+    current: number;
+    total: number;
+    successCount: number;
+    failCount: number;
+  } | null>(null);
 
   useEffect(() => {
     isCompareOpenRef.current = isCompareOpen;
@@ -1234,7 +1241,10 @@ ${newDescription}`
     }
   };
 
-  const handlePublish = async (product: ShopifyProduct) => {
+  const handlePublish = async (
+    product: ShopifyProduct,
+    skipRefetch = false
+  ) => {
     try {
       const pendingDescription = pendingDescriptions[product.id];
       if (!pendingDescription) return;
@@ -1351,9 +1361,11 @@ ${newDescription}`
         );
       }
 
-      // Refresh pending descriptions to ensure state is in sync with database
-      // Don't refresh products to avoid UI jumps
-      await fetchPendingDescriptions(company);
+      // Only refresh pending descriptions if not in a bulk operation
+      // Bulk operations will handle this once at the end
+      if (!skipRefetch) {
+        await fetchPendingDescriptions(company);
+      }
 
       toast.success("Product description updated successfully");
     } catch (error) {
@@ -1449,45 +1461,101 @@ ${newDescription}`
       selectedPendingProducts.length
     } product${
       selectedPendingProducts.length !== 1 ? "s" : ""
-    } with pending content. Continue?`;
+    } with pending content. This will run in the background so you can continue working. Continue?`;
     if (!confirm(confirmMessage)) {
       return;
     }
 
-    let successCount = 0;
-    let failCount = 0;
-    const newPublishedProducts = new Set(publishedProducts);
+    // Initialize progress
+    setBulkPublishProgress({
+      isPublishing: true,
+      current: 0,
+      total: selectedPendingProducts.length,
+      successCount: 0,
+      failCount: 0,
+    });
 
-    try {
-      for (const product of selectedPendingProducts) {
-        try {
-          console.log(
-            `[Bulk Publish] Publishing: ${product.title} (${product.id})`
-          );
-          await handlePublish(product);
-          newPublishedProducts.add(product.id);
-          successCount++;
-          toast.success(
-            `Progress: ${successCount + failCount}/${
-              selectedPendingProducts.length
-            } - Published: ${product.title}`
-          );
-        } catch (error) {
-          failCount++;
-          console.error(`Failed to publish ${product.title}:`, error);
-          toast.error(`Failed: ${product.title}`);
-        }
-      }
+    setSelectedProducts(new Set());
 
-      setPublishedProducts(newPublishedProducts);
-      toast.success(
-        `Completed! Successfully published: ${successCount}, Failed: ${failCount}`
+    // Run the publishing in the background (non-blocking)
+    (async () => {
+      const CONCURRENT_LIMIT = 5; // Process 5 products at a time for optimal speed
+      let successCount = 0;
+      let failCount = 0;
+      const newPublishedProducts = new Set(publishedProducts);
+
+      console.log(
+        `[Bulk Publish] Starting concurrent publish for ${selectedPendingProducts.length} products with concurrency ${CONCURRENT_LIMIT}`
       );
-      setSelectedProducts(new Set());
-    } catch (error) {
-      console.error("Error in bulk publish:", error);
-      toast.error("Failed to complete bulk publish");
-    }
+
+      try {
+        // Process product publishing
+        const processProduct = async (product: ShopifyProduct) => {
+          try {
+            console.log(
+              `[Bulk Publish] Publishing: ${product.title} (${product.id})`
+            );
+            await handlePublish(product, true);
+            return { success: true, product };
+          } catch (error) {
+            console.error(`Failed to publish ${product.title}:`, error);
+            return { success: false, product, error };
+          }
+        };
+
+        // Process in batches with concurrency limit
+        for (
+          let i = 0;
+          i < selectedPendingProducts.length;
+          i += CONCURRENT_LIMIT
+        ) {
+          const batch = selectedPendingProducts.slice(i, i + CONCURRENT_LIMIT);
+          const batchResults = await Promise.allSettled(
+            batch.map((product) => processProduct(product))
+          );
+
+          // Process results
+          batchResults.forEach((result) => {
+            if (result.status === "fulfilled" && result.value.success) {
+              newPublishedProducts.add(result.value.product.id);
+              successCount++;
+            } else {
+              failCount++;
+            }
+          });
+
+          // Update progress after each batch
+          setBulkPublishProgress({
+            isPublishing: true,
+            current: successCount + failCount,
+            total: selectedPendingProducts.length,
+            successCount,
+            failCount,
+          });
+        }
+
+        setPublishedProducts(newPublishedProducts);
+
+        // Fetch pending descriptions once at the end instead of after each product
+        await fetchPendingDescriptions(company);
+
+        toast.success(
+          `Bulk publish completed! Successfully published: ${successCount}, Failed: ${failCount}`
+        );
+      } catch (error) {
+        console.error("Error in bulk publish:", error);
+        toast.error("Failed to complete bulk publish");
+      } finally {
+        // Clear progress indicator
+        setBulkPublishProgress(null);
+      }
+    })();
+
+    // Show initial toast
+    toast.success(
+      `Started publishing ${selectedPendingProducts.length} products in the background. You can continue working.`,
+      { duration: 4000 }
+    );
   };
 
   const CompareDialog = () => {
@@ -2516,6 +2584,56 @@ ${newDescription}`
               </Button>
             </div>
           </div>
+
+          {/* Background Bulk Publish Progress Indicator */}
+          {bulkPublishProgress && (
+            <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950">
+              <CardContent className="py-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="animate-spin text-lg">⟳</span>
+                    <div>
+                      <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                        Publishing products in background...
+                      </p>
+                      <p className="text-xs text-blue-700 dark:text-blue-300">
+                        {bulkPublishProgress.current} of{" "}
+                        {bulkPublishProgress.total} processed
+                        {" • "}✅ {bulkPublishProgress.successCount} succeeded
+                        {bulkPublishProgress.failCount > 0 && (
+                          <>
+                            {" • "}❌ {bulkPublishProgress.failCount} failed
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-blue-900 dark:text-blue-100">
+                      {Math.round(
+                        (bulkPublishProgress.current /
+                          bulkPublishProgress.total) *
+                          100
+                      )}
+                      %
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-2 w-full bg-blue-200 dark:bg-blue-900 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 dark:bg-blue-400 h-2 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${
+                        (bulkPublishProgress.current /
+                          bulkPublishProgress.total) *
+                        100
+                      }%`,
+                    }}
+                  ></div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Search & Filters Card */}
           <Card>
