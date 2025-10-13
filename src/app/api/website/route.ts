@@ -26,7 +26,8 @@ export async function GET() {
     const userEmails = user.emailAddresses.map((email) => email.emailAddress);
     console.log("Checking access for emails:", userEmails);
 
-    // Get websites owned by the user with all fields
+    // Get websites owned by the user with essential fields only
+    // IMPORTANT: Exclude large arrays that aren't needed for this endpoint
     const websites = await Website.find(
       { userId: user.id },
       {
@@ -34,16 +35,20 @@ export async function GET() {
         website: 1,
         description: 1,
         summary: 1,
-        content: 1,
+        content: 1, // Include content for now (used by some pages)
         folders: 1,
         toneofvoice: 1,
         targetAudience: 1,
         sharedUsers: 1,
         platformIntegrations: 1,
+        pendingProductDescriptions: 0, // Exclude - migrated to separate collection
+        publishedProducts: 0, // Exclude - migrated to separate collection
+        pendingCollectionDescriptions: 0, // Exclude - not commonly used
       }
     );
 
-    // Get websites shared with any of the user's emails with all fields
+    // Get websites shared with any of the user's emails with essential fields only
+    // IMPORTANT: Exclude large arrays that aren't needed for this endpoint
     const sharedWebsites = await Website.find(
       { sharedUsers: { $in: userEmails } },
       {
@@ -51,12 +56,15 @@ export async function GET() {
         website: 1,
         description: 1,
         summary: 1,
-        content: 1,
+        content: 1, // Include content for now (used by some pages)
         folders: 1,
         toneofvoice: 1,
         targetAudience: 1,
         sharedUsers: 1,
         platformIntegrations: 1,
+        pendingProductDescriptions: 0, // Exclude - migrated to separate collection
+        publishedProducts: 0, // Exclude - migrated to separate collection
+        pendingCollectionDescriptions: 0, // Exclude - not commonly used
       }
     );
 

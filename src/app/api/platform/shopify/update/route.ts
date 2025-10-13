@@ -6,6 +6,36 @@ import {
   DescriptionPlacementConfig,
 } from "@/models/Website";
 
+// In-memory cache for website credentials
+interface CachedWebsite {
+  website: {
+    platformIntegrations: PlatformConfig[];
+    [key: string]: unknown;
+  };
+  timestamp: number;
+}
+
+const credentialsCache = new Map<string, CachedWebsite>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCachedWebsite(company: string) {
+  const cached = credentialsCache.get(company);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log(`[Cache] Hit for company: ${company}`);
+    return cached.website;
+  }
+  console.log(`[Cache] Miss for company: ${company}`);
+  return null;
+}
+
+function setCachedWebsite(company: string, website: CachedWebsite["website"]) {
+  credentialsCache.set(company, {
+    website,
+    timestamp: Date.now(),
+  });
+  console.log(`[Cache] Stored credentials for company: ${company}`);
+}
+
 // Helper function to extract numeric ID from Shopify Global ID
 function extractNumericId(gid: string): string {
   const match = gid.match(/\/(\d+)$/);
@@ -307,14 +337,25 @@ export async function POST(req: Request) {
       );
     }
 
-    await connectToDatabase();
-    console.log("[DEBUG] Connected to database");
+    // Try to get website from cache first
+    let website = getCachedWebsite(company);
 
-    // Get the website document to access Shopify credentials
-    const website = await Website.findOne({ name: company });
     if (!website) {
-      console.log("[DEBUG] Website not found:", company);
-      return NextResponse.json({ error: "Website not found" }, { status: 404 });
+      await connectToDatabase();
+      console.log("[DEBUG] Connected to database");
+
+      // Get the website document to access Shopify credentials
+      website = await Website.findOne({ name: company });
+      if (!website) {
+        console.log("[DEBUG] Website not found:", company);
+        return NextResponse.json(
+          { error: "Website not found" },
+          { status: 404 }
+        );
+      }
+
+      // Cache the website for future requests
+      setCachedWebsite(company, website);
     }
 
     console.log("[DEBUG] Found website:", company);
@@ -334,6 +375,14 @@ export async function POST(req: Request) {
     console.log("[DEBUG] Found Shopify integration");
 
     const { storeName, accessToken } = shopifyIntegration.credentials;
+
+    if (!storeName || !accessToken) {
+      console.log("[DEBUG] Missing storeName or accessToken");
+      return NextResponse.json(
+        { error: "Shopify credentials are incomplete" },
+        { status: 400 }
+      );
+    }
 
     // Ensure storeName is properly formatted
     const formattedStoreName = storeName.includes(".myshopify.com")

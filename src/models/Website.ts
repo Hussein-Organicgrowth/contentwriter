@@ -124,6 +124,8 @@ export interface IWebsite extends mongoose.Document {
   businessAnalysis?: string;
   contentStructureAnalysis?: string;
   keyUrls?: string[];
+  productDescriptionsMigrated?: boolean;
+  productDescriptionsMigratedAt?: Date;
 }
 
 const websiteSchema = new mongoose.Schema({
@@ -288,6 +290,8 @@ const websiteSchema = new mongoose.Schema({
   businessAnalysis: { type: String, default: "" },
   contentStructureAnalysis: { type: String, default: "" },
   keyUrls: { type: [String], default: [] },
+  productDescriptionsMigrated: { type: Boolean, default: false },
+  productDescriptionsMigratedAt: { type: Date },
 });
 
 export const Website =

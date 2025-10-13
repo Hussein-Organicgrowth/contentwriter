@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import connectToDatabase from "@/lib/mongodb";
-import { Website } from "@/models/Website";
+import { PublishedProductDescription } from "@/models/ProductDescription";
 
 export async function POST(req: Request) {
   try {
@@ -23,57 +23,39 @@ export async function POST(req: Request) {
 
     await connectToDatabase();
 
-    const website = await Website.findOne({ name: company });
-    if (!website) {
-      console.log(`Website not found for company: ${company}`);
-      return NextResponse.json({ error: "Website not found" }, { status: 404 });
-    }
-
-    console.log("Website found:", {
-      name: website.name,
-      hasPublishedProducts: !!website.publishedProducts,
-      publishedProductsCount: website.publishedProducts
-        ? website.publishedProducts.length
-        : 0,
-    });
-
-    // Initialize publishedProducts array if it doesn't exist
-    if (!website.publishedProducts) {
-      console.log("Initializing publishedProducts array");
-      website.publishedProducts = [];
-    }
-
-    // Check if product is already in the published list
-    const existingIndex = website.publishedProducts.findIndex(
-      (pub: { productId: string }) => pub.productId === productId
-    );
-
-    console.log("Existing product index:", existingIndex);
-
-    if (existingIndex !== -1) {
-      // Update existing entry
-      if (isPublished) {
-        console.log("Updating existing published product");
-        website.publishedProducts[existingIndex] = {
+    if (isPublished) {
+      // Upsert the published status
+      const result = await PublishedProductDescription.findOneAndUpdate(
+        {
+          websiteName: company,
           productId,
-          publishedAt: publishedAt || new Date().toISOString(),
-        };
-      } else {
-        // Remove from published list if isPublished is false
-        console.log("Removing product from published list");
-        website.publishedProducts.splice(existingIndex, 1);
-      }
-    } else if (isPublished) {
-      // Add new entry only if isPublished is true
-      console.log("Adding new published product");
-      website.publishedProducts.push({
-        productId,
-        publishedAt: publishedAt || new Date().toISOString(),
-      });
-    }
+        },
+        {
+          $set: {
+            publishedAt: publishedAt ? new Date(publishedAt) : new Date(),
+            isActive: true,
+          },
+        },
+        {
+          upsert: true,
+          new: true,
+        }
+      );
 
-    await website.save();
-    console.log("Website saved successfully");
+      console.log("Published status saved:", result._id);
+    } else {
+      // Remove published status by setting isActive to false
+      await PublishedProductDescription.updateOne(
+        {
+          websiteName: company,
+          productId,
+        },
+        {
+          $set: { isActive: false },
+        }
+      );
+      console.log("Published status removed");
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -106,38 +88,34 @@ export async function GET(req: Request) {
 
     await connectToDatabase();
 
-    const website = await Website.findOne({ name: company });
-    if (!website) {
-      console.log(`Website not found for company: ${company}`);
-      return NextResponse.json({ error: "Website not found" }, { status: 404 });
-    }
-
-    console.log("Website found:", {
-      name: website.name,
-      hasPublishedProducts: !!website.publishedProducts,
-      publishedProductsCount: website.publishedProducts
-        ? website.publishedProducts.length
-        : 0,
-    });
-
-    // Initialize publishedProducts array if it doesn't exist
-    if (!website.publishedProducts) {
-      console.log("Initializing publishedProducts array");
-      website.publishedProducts = [];
-      await website.save();
-    }
-
     if (productId) {
       // Return information for a specific product
-      const publishedProduct = website.publishedProducts.find(
-        (pub: { productId: string }) => pub.productId === productId
-      );
+      const publishedProduct = await PublishedProductDescription.findOne({
+        websiteName: company,
+        productId,
+        isActive: true,
+      })
+        .select("productId publishedAt")
+        .lean();
+
       console.log("Returning specific published product:", publishedProduct);
       return NextResponse.json({ publishedProduct });
     }
 
+    // Get all published products for this website
+    const publishedProducts = await PublishedProductDescription.find({
+      websiteName: company,
+      isActive: true,
+    })
+      .select("productId publishedAt")
+      .lean();
+
+    console.log(
+      `Found ${publishedProducts.length} published products for ${company}`
+    );
+
     return NextResponse.json({
-      publishedProducts: website.publishedProducts || [],
+      publishedProducts: publishedProducts || [],
     });
   } catch (error) {
     console.error("Error fetching published products:", error);
@@ -163,18 +141,18 @@ export async function DELETE(req: Request) {
 
     await connectToDatabase();
 
-    const website = await Website.findOne({ name: company });
-    if (!website) {
-      return NextResponse.json({ error: "Website not found" }, { status: 404 });
-    }
+    // Soft delete by setting isActive to false to maintain history
+    const result = await PublishedProductDescription.updateOne(
+      {
+        websiteName: company,
+        productId,
+      },
+      {
+        $set: { isActive: false },
+      }
+    );
 
-    // Remove the product from published list
-    if (website.publishedProducts) {
-      website.publishedProducts = website.publishedProducts.filter(
-        (pub: { productId: string }) => pub.productId !== productId
-      );
-      await website.save();
-    }
+    console.log(`Soft deleted published status:`, result.modifiedCount);
 
     return NextResponse.json({ success: true });
   } catch (error) {

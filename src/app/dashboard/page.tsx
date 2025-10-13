@@ -8,9 +8,20 @@ async function getWebsites() {
   const user = await currentUser();
   await connectToDatabase();
 
+  // IMPORTANT: Exclude large arrays that aren't needed for the dashboard
+  const projection = {
+    pendingProductDescriptions: 0,
+    publishedProducts: 0,
+    pendingCollectionDescriptions: 0,
+    content: 0, // Exclude - not needed for dashboard, load only when viewing content
+  };
+
   const [ownedWebsites, sharedWebsites] = await Promise.all([
-    Website.find({ userId: user?.id }).sort({ createdAt: -1 }),
-    Website.find({ sharedUsers: user?.emailAddresses[0]?.emailAddress }).sort({
+    Website.find({ userId: user?.id }, projection).sort({ createdAt: -1 }),
+    Website.find(
+      { sharedUsers: user?.emailAddresses[0]?.emailAddress },
+      projection
+    ).sort({
       createdAt: -1,
     }),
   ]);

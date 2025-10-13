@@ -977,33 +977,40 @@ Use these HTML tags directly (without markdown code fences):
     const description = completion.choices[0]?.message?.content?.trim() || "";
     const cleanDescription = description.replace(/```html\n?|\n?```/g, "");
 
-    // Add internal links
-    const descriptionWithLinks =
-      (await findRelevantInternalLinks(
+    const mainKeyword = keyword || title;
+    const needsSummary =
+      req.headers.get("x-description-destination") === "metafield";
+
+    // Run these operations in parallel for better performance
+    const [descriptionWithLinks, seoMetadata, summaryHtml] = await Promise.all([
+      findRelevantInternalLinks(
         website,
         cleanDescription,
         title,
         languageKey
-      )) || cleanDescription; // Fallback to clean description if internal linking fails
-
-    const mainKeyword = keyword || title;
-    const seoMetadata = await generateSeoMetadata({
-      keyword: mainKeyword,
-      description: descriptionWithLinks,
-      language: languageKey,
-      country: targetCountryKey,
-    });
-
-    let summaryHtml: string | null = null;
-    if (req.headers.get("x-description-destination") === "metafield") {
-      summaryHtml = await generateSummary(
-        descriptionWithLinks,
-        company,
-        website,
-        languageKey,
-        targetCountryKey
-      );
-    }
+      ).catch((error) => {
+        console.error(
+          "Internal linking failed, using original description:",
+          error
+        );
+        return cleanDescription; // Fallback to clean description if internal linking fails
+      }),
+      generateSeoMetadata({
+        keyword: mainKeyword,
+        description: cleanDescription,
+        language: languageKey,
+        country: targetCountryKey,
+      }),
+      needsSummary
+        ? generateSummary(
+            cleanDescription,
+            company,
+            website,
+            languageKey,
+            targetCountryKey
+          )
+        : Promise.resolve(null),
+    ]);
 
     return NextResponse.json({
       success: true,

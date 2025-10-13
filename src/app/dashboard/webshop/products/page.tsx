@@ -292,7 +292,10 @@ export default function ProductsPage() {
 
   // Add debug to window for easy access
   useEffect(() => {
-    (window as any).debugProductsState = debugState;
+    if (typeof window !== "undefined") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).debugProductsState = debugState;
+    }
   }, [
     isGenerating,
     pendingDescriptions,
@@ -1071,12 +1074,22 @@ ${newDescription}`
       return;
     }
 
-    const CONCURRENT_LIMIT = 3; // Process 3 products at a time for optimal speed
+    const CONCURRENT_LIMIT = 8; // Process 8 products at a time for optimal speed
     setIsBulkGenerating(true);
     setBulkProgress({ current: 0, total: selectedProducts.size });
     let successCount = 0;
     let failCount = 0;
     const updatedPendingDescriptions = { ...pendingDescriptions };
+
+    // Throttle progress updates to prevent excessive re-renders
+    let lastProgressUpdate = 0;
+    const throttledProgressUpdate = (current: number, total: number) => {
+      const now = Date.now();
+      if (now - lastProgressUpdate > 100) {
+        setBulkProgress({ current, total });
+        lastProgressUpdate = now;
+      }
+    };
 
     try {
       const selectedProductsList = filteredProducts.filter((p) =>
@@ -1204,11 +1217,11 @@ ${newDescription}`
           }
         });
 
-        // Update progress
-        setBulkProgress({
-          current: successCount + failCount,
-          total: selectedProducts.size,
-        });
+        // Update progress (throttled)
+        throttledProgressUpdate(
+          successCount + failCount,
+          selectedProducts.size
+        );
 
         // Update state after each batch
         setPendingDescriptions({ ...updatedPendingDescriptions });
@@ -1245,13 +1258,30 @@ ${newDescription}`
     product: ShopifyProduct,
     skipRefetch = false
   ) => {
-    try {
-      const pendingDescription = pendingDescriptions[product.id];
-      if (!pendingDescription) return;
+    const pendingDescription = pendingDescriptions[product.id];
+    if (!pendingDescription) return;
 
+    // Store original state for rollback
+    const originalPendingDescription = { ...pendingDescription };
+    const wasPublished = publishedProducts.has(String(product.id));
+
+    try {
       console.log("Publishing product:", product.id);
 
-      // Update Shopify product description first
+      // Optimistic UI update - mark as published immediately
+      setPublishedProducts((prev) => {
+        const newSet = new Set(prev);
+        newSet.add(String(product.id));
+        return newSet;
+      });
+
+      setPendingDescriptions((prev) => {
+        const newPending = { ...prev };
+        delete newPending[product.id];
+        return newPending;
+      });
+
+      // Update Shopify product description
       const updateResponse = await fetch("/api/platform/shopify/update", {
         method: "POST",
         headers: {
@@ -1280,33 +1310,29 @@ ${newDescription}`
       // Get current timestamp
       const publishedAt = new Date().toISOString();
 
-      // Save published status to database
-      const savePublishedResponse = await fetch(
-        "/api/platform/shopify/published",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            productId: String(product.id),
-            company,
-            isPublished: true,
-            publishedAt,
-          }),
-        }
-      );
-
-      if (!savePublishedResponse.ok) {
+      // Save published status to database (non-blocking)
+      fetch("/api/platform/shopify/published", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          productId: String(product.id),
+          company,
+          isPublished: true,
+          publishedAt,
+        }),
+      }).catch((error) => {
         console.warn(
-          "Failed to save published status to database, but product was updated"
+          "Failed to save published status to database, but product was updated:",
+          error
         );
-        console.error("Error response:", await savePublishedResponse.text());
-      }
+      });
 
       // Get the updated product data
       const { product: updatedProduct } = await updateResponse.json();
 
+      // Update product list with latest data (optimistic updates already applied to published/pending state)
       setProducts((prevProducts) =>
         prevProducts.map((p) =>
           String(p.id) === String(product.id)
@@ -1323,18 +1349,6 @@ ${newDescription}`
             : p
         )
       );
-
-      setPublishedProducts((prev) => {
-        const newSet = new Set(prev);
-        newSet.add(String(product.id));
-        return newSet;
-      });
-
-      setPendingDescriptions((prev) => {
-        const newPending = { ...prev };
-        delete newPending[product.id];
-        return newPending;
-      });
 
       if (
         selectedProduct &&
@@ -1370,6 +1384,21 @@ ${newDescription}`
       toast.success("Product description updated successfully");
     } catch (error) {
       console.error("Error publishing description:", error);
+
+      // Rollback optimistic updates on error
+      if (!wasPublished) {
+        setPublishedProducts((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(String(product.id));
+          return newSet;
+        });
+      }
+
+      setPendingDescriptions((prev) => ({
+        ...prev,
+        [product.id]: originalPendingDescription,
+      }));
+
       toast.error("Failed to publish description");
     }
   };
@@ -1479,10 +1508,31 @@ ${newDescription}`
 
     // Run the publishing in the background (non-blocking)
     (async () => {
-      const CONCURRENT_LIMIT = 5; // Process 5 products at a time for optimal speed
+      const CONCURRENT_LIMIT = 12; // Process 12 products at a time for optimal speed
       let successCount = 0;
       let failCount = 0;
       const newPublishedProducts = new Set(publishedProducts);
+
+      // Throttle progress updates to prevent excessive re-renders
+      let lastProgressUpdate = 0;
+      const throttledProgressUpdate = (
+        current: number,
+        total: number,
+        success: number,
+        fail: number
+      ) => {
+        const now = Date.now();
+        if (now - lastProgressUpdate > 100) {
+          setBulkPublishProgress({
+            isPublishing: true,
+            current,
+            total,
+            successCount: success,
+            failCount: fail,
+          });
+          lastProgressUpdate = now;
+        }
+      };
 
       console.log(
         `[Bulk Publish] Starting concurrent publish for ${selectedPendingProducts.length} products with concurrency ${CONCURRENT_LIMIT}`
@@ -1524,14 +1574,13 @@ ${newDescription}`
             }
           });
 
-          // Update progress after each batch
-          setBulkPublishProgress({
-            isPublishing: true,
-            current: successCount + failCount,
-            total: selectedPendingProducts.length,
+          // Update progress after each batch (throttled)
+          throttledProgressUpdate(
+            successCount + failCount,
+            selectedPendingProducts.length,
             successCount,
-            failCount,
-          });
+            failCount
+          );
         }
 
         setPublishedProducts(newPublishedProducts);
@@ -3224,8 +3273,9 @@ ${newDescription}`
                   <div className="space-y-1">
                     <p className="text-sm font-semibold">Product Description</p>
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      Update Shopify's main product description (`body_html`).
-                      Recommended when your theme reads the default description.
+                      Update Shopify&apos;s main product description
+                      (`body_html`). Recommended when your theme reads the
+                      default description.
                     </p>
                   </div>
                 </Button>
@@ -3333,8 +3383,8 @@ ${newDescription}`
                     Publish page title and meta description
                   </p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    When enabled, publishing updates the product's SEO title and
-                    meta description in Shopify.
+                    When enabled, publishing updates the product&apos;s SEO
+                    title and meta description in Shopify.
                   </p>
                 </div>
                 <Switch
