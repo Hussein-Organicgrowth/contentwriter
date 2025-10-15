@@ -85,7 +85,6 @@ interface ShopifyProduct {
 interface ProductsResponse {
   products: ShopifyProduct[];
   total: number;
-  totalPages: number;
   progress: {
     current: number;
     total: number;
@@ -273,6 +272,7 @@ export default function ProductsPage() {
     successCount: number;
     failCount: number;
   } | null>(null);
+  const [isPendingDataLoading, setIsPendingDataLoading] = useState(false);
 
   useEffect(() => {
     isCompareOpenRef.current = isCompareOpen;
@@ -315,6 +315,22 @@ export default function ProductsPage() {
       fetchShopifySettings(storedCompany);
     }
   }, []);
+
+  useEffect(() => {
+    console.log("Pending descriptions state changed:", {
+      totalPending: Object.keys(pendingDescriptions).length,
+      firstFewKeys: Object.keys(pendingDescriptions).slice(0, 3),
+      changeTrigger: "useEffect dependency",
+      timestamp: new Date().toISOString(),
+    });
+  }, [pendingDescriptions]);
+
+  useEffect(() => {
+    console.log("Products state changed:", {
+      totalProducts: products.length,
+      firstFewProductIds: products.slice(0, 3).map((p) => p.id),
+    });
+  }, [products]);
 
   useEffect(() => {
     if (company && isConnected) {
@@ -361,12 +377,24 @@ export default function ProductsPage() {
       showPublishedOnly,
       pendingDescriptionsCount: Object.keys(pendingDescriptions).length,
       publishedProductsCount: publishedProducts.size,
+      timestamp: new Date().toISOString(),
     });
 
     let filtered = products;
 
     // Filter by pending status if enabled (pending but NOT published)
     if (showPendingOnly) {
+      const productsWithPending = products.filter(
+        (p) => !!pendingDescriptions[p.id]
+      );
+      const productsWithPendingAndNotPublished = products.filter(
+        (p) =>
+          !!pendingDescriptions[p.id] && !publishedProducts.has(String(p.id))
+      );
+      console.log(
+        `Pending filter: ${productsWithPending.length} have pending, ${productsWithPendingAndNotPublished.length} pending but not published`
+      );
+
       filtered = filtered.filter(
         (product) =>
           pendingDescriptions[product.id] &&
@@ -376,6 +404,13 @@ export default function ProductsPage() {
 
     // Filter by NO pending status if enabled (products that need content)
     if (showNoPendingOnly) {
+      const productsWithoutPending = products.filter(
+        (p) => !pendingDescriptions[p.id]
+      );
+      console.log(
+        `No-pending filter: ${productsWithoutPending.length} products have no pending descriptions`
+      );
+
       filtered = filtered.filter((product) => !pendingDescriptions[product.id]);
     }
 
@@ -616,6 +651,46 @@ export default function ProductsPage() {
     setIsSettingsOpen(true);
   };
 
+  // Retry wrapper function with exponential backoff
+  const fetchWithRetry = async (
+    url: string,
+    maxRetries = 3,
+    timeoutMs = 30000
+  ): Promise<Response | null> => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[Retry] Attempt ${attempt}/${maxRetries} for ${url}`);
+        const response = await Promise.race([
+          fetch(url),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Timeout")), timeoutMs)
+          ),
+        ]);
+
+        if (response instanceof Response) {
+          if (response.ok) {
+            console.log(`[Retry] Success on attempt ${attempt}`);
+            return response;
+          }
+          console.warn(
+            `[Retry] Non-OK response on attempt ${attempt}: ${response.status}`
+          );
+        }
+      } catch (error) {
+        console.warn(`[Retry] Attempt ${attempt} failed:`, error);
+        if (attempt === maxRetries) {
+          console.error(`[Retry] All ${maxRetries} attempts failed for ${url}`);
+          return null;
+        }
+        // Exponential backoff: 1s, 2s, 3s
+        const delay = 1000 * attempt;
+        console.log(`[Retry] Waiting ${delay}ms before next attempt...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    return null;
+  };
+
   const fetchProducts = async (companyName: string, cursor?: string | null) => {
     try {
       console.log("Starting fetchProducts with:", { companyName, cursor });
@@ -634,22 +709,16 @@ export default function ProductsPage() {
 
       console.log("Fetching with query params:", queryParams.toString());
 
-      const [productsResponse, pendingResponse, publishedResponse] =
-        await Promise.all([
-          fetch(
-            `/api/platform/shopify/products?${queryParams}${
-              cursor ? "" : "&bypassCache=false"
-            }`
-          ),
-          fetch(`/api/platform/shopify/pending?company=${companyName}`),
-          fetch(`/api/platform/shopify/published?company=${companyName}`),
-        ]);
+      console.log("Starting API calls...");
 
-      console.log("API responses status:", {
-        products: productsResponse.status,
-        pending: pendingResponse.status,
-        published: publishedResponse.status,
-      });
+      // Fetch products first (critical)
+      const productsResponse = await fetch(
+        `/api/platform/shopify/products?${queryParams}${
+          cursor ? "" : "&bypassCache=false"
+        }`
+      );
+
+      console.log("Products API response status:", productsResponse.status);
 
       if (!productsResponse.ok) {
         const errorText = await productsResponse.text();
@@ -661,15 +730,102 @@ export default function ProductsPage() {
       console.log("Raw API response:", JSON.stringify(productsData, null, 2));
       console.log("Received products data:", {
         total: productsData.total,
-        totalPages: productsData.totalPages,
         productsCount: productsData.products.length,
         progress: productsData.progress,
         pagination: productsData.pagination,
       });
 
+      // Extract product IDs for optimized pending/published API calls
+      const productIds = productsData.products.map((p) => p.id).join(",");
+
+      // For pagination, only fetch pending/published for NEW products to avoid slow queries
+      // For initial load, fetch for all products
+      const idsToFetch = cursor ? productIds : productIds;
+
+      console.log("Extracted product IDs for filtering:", {
+        isPagination: !!cursor,
+        currentBatchCount: productsData.products.length,
+        totalLoadedCount: products.length,
+        idsToFetchCount: idsToFetch.split(",").length,
+        firstFewIds: productsData.products.slice(0, 3).map((p) => p.id),
+        strategy: cursor ? "NEW_PRODUCTS_ONLY" : "ALL_PRODUCTS",
+      });
+
+      // Fetch pending and published data sequentially for better UX
+      // Pending loads first (higher priority), then published
+
+      let pendingResponse = null;
+      let publishedResponse = null;
+
+      // Fetch pending/published data only for the products we need
+      console.log(
+        "Fetching pending/published data - cursor:",
+        cursor ? "pagination (NEW products only)" : "initial (ALL products)"
+      );
+
+      // Set loading state for pending data
+      setIsPendingDataLoading(true);
+
+      // Load pending data first (higher priority for user experience)
+      // Using retry logic with 30s timeout and 3 retries
+      pendingResponse = await fetchWithRetry(
+        `/api/platform/shopify/pending?company=${companyName}&productIds=${idsToFetch}`,
+        3,
+        30000
+      );
+
+      if (!pendingResponse) {
+        console.error("Failed to fetch pending data after all retries");
+        toast.error("Failed to load pending content status. Please refresh.");
+      }
+
+      // Then load published data
+      // Using retry logic with 10s timeout and 2 retries
+      publishedResponse = await fetchWithRetry(
+        `/api/platform/shopify/published?company=${companyName}&productIds=${idsToFetch}`,
+        2,
+        10000
+      );
+
+      if (!publishedResponse) {
+        console.error("Failed to fetch published data after all retries");
+        toast.error("Failed to load published status. Please refresh.");
+      }
+
+      // Clear loading state
+      setIsPendingDataLoading(false);
+
+      console.log(
+        "After fetch logic - cursor:",
+        cursor,
+        "pendingResponse:",
+        pendingResponse,
+        "publishedResponse:",
+        publishedResponse
+      );
+
+      console.log("Pending/Published API responses:", {
+        pending: pendingResponse
+          ? `Success (${pendingResponse.status})`
+          : "Failed/Timeout",
+        published: publishedResponse
+          ? `Success (${publishedResponse.status})`
+          : "Failed/Timeout",
+        isPagination: !!cursor,
+      });
+
+      console.log(
+        "About to check pending response processing - pendingResponse is:",
+        pendingResponse ? "not null" : "null"
+      );
+
       // Update products state based on whether this is a new load or pagination
       if (cursor) {
-        console.log("Appending products to existing list");
+        console.log("Appending products to existing list - PAGINATION MODE");
+        console.log(
+          "Before pagination - pending descriptions count:",
+          Object.keys(pendingDescriptions).length
+        );
         setProducts((prev) => {
           const uniqueProducts = new Map();
           prev.forEach((product) => uniqueProducts.set(product.id, product));
@@ -683,10 +839,28 @@ export default function ProductsPage() {
 
           return newProducts;
         });
+
+        // For pagination, accumulate pending/published data instead of replacing
+        // The pending/published APIs return filtered data for the new products only
+        console.log(
+          "Accumulating pending/published data for pagination - fetched for",
+          idsToFetch.split(",").length,
+          "NEW products to ensure status indicators are added"
+        );
       } else {
         console.log("Setting new products list");
         setProducts(productsData.products);
         setLoadedProductsCount(productsData.products.length);
+
+        // For fresh loads, clear existing pending/published state
+        console.log("Clearing pending/published state for fresh load");
+        console.log(
+          "Before clearing - pending descriptions had:",
+          Object.keys(pendingDescriptions).length,
+          "items"
+        );
+        setPendingDescriptions({});
+        setPublishedProducts(new Set());
       }
 
       // Update progress based on API response
@@ -708,50 +882,75 @@ export default function ProductsPage() {
       }
 
       // Process published products data if available
-      if (publishedResponse.ok) {
+      if (publishedResponse && publishedResponse.ok) {
         const publishedData = await publishedResponse.json();
         console.log("Published data:", {
           publishedProductsCount: publishedData.publishedProducts?.length || 0,
+          isPagination: !!cursor,
         });
 
         if (
           publishedData.publishedProducts &&
           Array.isArray(publishedData.publishedProducts)
         ) {
-          const publishedSet = new Set<string>();
-          setProducts((prevProducts) => {
-            const updatedProducts = prevProducts.map(
-              (product: ShopifyProduct) => {
-                const productIdStr = String(product.id);
-                const publishedInfo = publishedData.publishedProducts.find(
-                  (p: { productId: string; publishedAt: string }) =>
-                    String(p.productId) === productIdStr
-                );
-
-                if (publishedInfo) {
-                  publishedSet.add(productIdStr);
-                  return {
-                    ...product,
-                    isPublished: true,
-                    publishedAt: publishedInfo.publishedAt,
-                  };
-                }
-                return product;
+          // Accumulate published products state during pagination
+          setPublishedProducts((prevPublished) => {
+            const newPublishedSet = new Set(prevPublished);
+            publishedData.publishedProducts.forEach(
+              (p: { productId: string; publishedAt: string }) => {
+                newPublishedSet.add(String(p.productId));
               }
             );
-
-            setPublishedProducts(publishedSet);
-            return updatedProducts;
+            console.log(
+              `Accumulated published products: ${prevPublished.size} -> ${
+                newPublishedSet.size
+              } (added ${newPublishedSet.size - prevPublished.size})`
+            );
+            return newPublishedSet;
           });
+
+          // Update products with published info
+          setProducts((prevProducts) =>
+            prevProducts.map((product: ShopifyProduct) => {
+              const productIdStr = String(product.id);
+              const publishedInfo = publishedData.publishedProducts.find(
+                (p: { productId: string; publishedAt: string }) =>
+                  String(p.productId) === productIdStr
+              );
+
+              if (publishedInfo) {
+                return {
+                  ...product,
+                  isPublished: true,
+                  publishedAt: publishedInfo.publishedAt,
+                };
+              }
+              return product;
+            })
+          );
         }
       }
 
       // Handle pending descriptions and history
-      if (pendingResponse.ok) {
+      console.log(
+        "Checking if pending processing should run - cursor:",
+        cursor ? "pagination" : "initial",
+        "pendingResponse:",
+        pendingResponse ? "exists" : "null"
+      );
+      if (pendingResponse && pendingResponse.ok) {
+        console.log(
+          `Processing pending data - mode: ${
+            cursor ? "PAGINATION (accumulate)" : "INITIAL (replace)"
+          }`
+        );
         const pendingData = await pendingResponse.json();
-        console.log("Pending data:", {
+        console.log("Pending data received:", {
           pendingDescriptionsCount:
             pendingData.pendingDescriptions?.length || 0,
+          status: pendingResponse.status,
+          hasPendingDescriptions: !!pendingData.pendingDescriptions,
+          isPagination: !!cursor,
         });
 
         if (pendingData.pendingDescriptions) {
@@ -765,51 +964,71 @@ export default function ProductsPage() {
           console.log("Filtered pending data:", {
             historyItemsCount: historyItems.length,
             pendingItemsCount: pendingItems.length,
+            samplePendingItems: pendingItems
+              .slice(0, 3)
+              .map((p: PendingDescriptionWithHistory) => ({
+                productId: p.productId,
+                hasNewDescription: !!p.newDescription,
+              })),
           });
 
-          const historyMap = historyItems.reduce(
-            (
-              acc: Record<string, DescriptionHistory[]>,
-              desc: PendingDescriptionWithHistory
-            ) => {
-              if (!acc[desc.productId]) {
-                acc[desc.productId] = [];
-              }
-              if (desc.timestamp) {
-                acc[desc.productId].push({
-                  id: desc.timestamp,
-                  description: desc.oldDescription,
-                  createdAt: desc.timestamp,
-                  isActive: false,
-                });
-              }
-              return acc;
-            },
-            {}
-          );
-
-          setProducts((prevProducts) => {
-            const updatedProducts = prevProducts.map(
-              (product: ShopifyProduct) => ({
-                ...product,
-                descriptionHistory: historyMap[product.id] || [],
-              })
+          // Accumulate pending descriptions state - merge with existing
+          setPendingDescriptions((prev) => {
+            console.log(
+              "Previous pending state had:",
+              Object.keys(prev).length,
+              "items"
             );
+            const newPendingState = {
+              ...prev,
+              ...Object.fromEntries(
+                pendingItems.map((item: PendingDescriptionWithHistory) => [
+                  item.productId,
+                  item,
+                ])
+              ),
+            };
+            console.log(
+              `Accumulated pending state: ${Object.keys(prev).length} -> ${
+                Object.keys(newPendingState).length
+              } (added ${
+                Object.keys(newPendingState).length - Object.keys(prev).length
+              })`
+            );
+            return newPendingState;
+          });
 
-            const descriptionsMap = pendingItems.reduce(
+          // Update product history if available
+          if (historyItems.length > 0) {
+            const historyMap = historyItems.reduce(
               (
-                acc: Record<string, PendingDescription>,
-                desc: PendingDescription
+                acc: Record<string, DescriptionHistory[]>,
+                desc: PendingDescriptionWithHistory
               ) => {
-                acc[desc.productId] = desc;
+                if (!acc[desc.productId]) {
+                  acc[desc.productId] = [];
+                }
+                if (desc.timestamp) {
+                  acc[desc.productId].push({
+                    id: desc.timestamp,
+                    description: desc.oldDescription,
+                    createdAt: desc.timestamp,
+                    isActive: false,
+                  });
+                }
                 return acc;
               },
               {}
             );
-            setPendingDescriptions((prev) => ({ ...prev, ...descriptionsMap }));
 
-            return updatedProducts;
-          });
+            setProducts((prevProducts) =>
+              prevProducts.map((product: ShopifyProduct) => ({
+                ...product,
+                descriptionHistory:
+                  historyMap[product.id] || product.descriptionHistory || [],
+              }))
+            );
+          }
         }
       }
 
@@ -849,8 +1068,10 @@ export default function ProductsPage() {
       console.error("Error in fetchProducts:", error);
       toast.error("Failed to fetch products");
     } finally {
+      console.log("Clearing loading states in finally block");
       setIsLoading(false);
       setIsLoadingMore(false);
+      setIsPendingDataLoading(false);
     }
   };
 
@@ -904,6 +1125,7 @@ export default function ProductsPage() {
 
   const fetchPendingDescriptions = async (companyName: string) => {
     try {
+      console.log("fetchPendingDescriptions called for", companyName);
       const response = await fetch(
         `/api/platform/shopify/pending?company=${companyName}`
       );
@@ -919,7 +1141,14 @@ export default function ProductsPage() {
           },
           {}
         );
-        setPendingDescriptions(descriptionsMap);
+        setPendingDescriptions((prev) => {
+          console.log(
+            `fetchPendingDescriptions merging ${
+              Object.keys(descriptionsMap).length
+            } items into existing ${Object.keys(prev).length} items`
+          );
+          return { ...prev, ...descriptionsMap };
+        });
       }
     } catch (error) {
       console.error("Error fetching pending descriptions:", error);
@@ -1261,24 +1490,18 @@ ${newDescription}`
     const pendingDescription = pendingDescriptions[product.id];
     if (!pendingDescription) return;
 
-    // Store original state for rollback
-    const originalPendingDescription = { ...pendingDescription };
+    // Store original published state for rollback
     const wasPublished = publishedProducts.has(String(product.id));
 
     try {
       console.log("Publishing product:", product.id);
 
       // Optimistic UI update - mark as published immediately
+      // Keep the pending description in state so users can see what was published
       setPublishedProducts((prev) => {
         const newSet = new Set(prev);
         newSet.add(String(product.id));
         return newSet;
-      });
-
-      setPendingDescriptions((prev) => {
-        const newPending = { ...prev };
-        delete newPending[product.id];
-        return newPending;
       });
 
       // Update Shopify product description
@@ -1375,17 +1598,27 @@ ${newDescription}`
         );
       }
 
-      // Only refresh pending descriptions if not in a bulk operation
-      // Bulk operations will handle this once at the end
-      if (!skipRefetch) {
-        await fetchPendingDescriptions(company);
+      // Show success message immediately
+      console.log("[Publish] Success! Showing toast and closing dialog");
+      toast.success("Product description updated successfully");
+
+      // Close the compare dialog if it's open
+      if (isCompareOpen) {
+        setIsCompareOpen(false);
       }
 
-      toast.success("Product description updated successfully");
+      // Only refresh pending descriptions if not in a bulk operation
+      // Bulk operations will handle this once at the end
+      // Make this non-blocking to avoid UI hang
+      if (!skipRefetch) {
+        fetchPendingDescriptions(company).catch((error) => {
+          console.warn("Failed to refresh pending descriptions:", error);
+        });
+      }
     } catch (error) {
       console.error("Error publishing description:", error);
 
-      // Rollback optimistic updates on error
+      // Rollback optimistic updates on error - only rollback published status
       if (!wasPublished) {
         setPublishedProducts((prev) => {
           const newSet = new Set(prev);
@@ -1394,10 +1627,7 @@ ${newDescription}`
         });
       }
 
-      setPendingDescriptions((prev) => ({
-        ...prev,
-        [product.id]: originalPendingDescription,
-      }));
+      // No need to restore pending description since we never removed it
 
       toast.error("Failed to publish description");
     }
@@ -1901,25 +2131,32 @@ ${newDescription}`
                     className="w-24 h-24 object-cover rounded-md"
                   />
                 )}
-                <div>
+                <div className="flex-1">
                   <DialogTitle className="text-xl">
                     {selectedProduct.title}
                   </DialogTitle>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Status:{" "}
-                    <span
-                      className={cn(
-                        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                        selectedProduct.status === "active"
-                          ? "bg-green-100 text-green-800"
-                          : selectedProduct.status === "draft"
-                          ? "bg-yellow-100 text-yellow-800"
-                          : "bg-gray-100 text-gray-800"
-                      )}
-                    >
-                      {selectedProduct.status}
-                    </span>
-                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <p className="text-sm text-muted-foreground">
+                      Status:{" "}
+                      <span
+                        className={cn(
+                          "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
+                          selectedProduct.status === "active"
+                            ? "bg-green-100 text-green-800"
+                            : selectedProduct.status === "draft"
+                            ? "bg-yellow-100 text-yellow-800"
+                            : "bg-gray-100 text-gray-800"
+                        )}
+                      >
+                        {selectedProduct.status}
+                      </span>
+                    </p>
+                    {publishedProducts.has(String(selectedProduct.id)) && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                        ✅ Content Published
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               <DialogDescription>
@@ -2136,14 +2373,25 @@ ${newDescription}`
                 variant="outline"
                 onClick={() => handleDiscardChanges(selectedProduct.id)}
               >
-                Discard Changes
+                {publishedProducts.has(String(selectedProduct.id))
+                  ? "Delete Content Record"
+                  : "Discard Changes"}
               </Button>
-              <Button
-                onClick={() => handlePublish(selectedProduct)}
-                variant="secondary"
-              >
-                Publish Changes
-              </Button>
+              {!publishedProducts.has(String(selectedProduct.id)) ? (
+                <Button
+                  onClick={() => handlePublish(selectedProduct)}
+                  variant="secondary"
+                >
+                  Publish Changes
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => handlePublish(selectedProduct)}
+                  variant="outline"
+                >
+                  Republish Changes
+                </Button>
+              )}
             </div>
           </DialogContent>
         </Dialog>
@@ -2420,19 +2668,27 @@ ${newDescription}`
           <div className="flex flex-col gap-2">
             <span>{product.title}</span>
             <div className="flex flex-wrap gap-2">
-              {pendingDescriptions[product.id] && (
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-fit">
-                  Pending Changes
-                </span>
-              )}
-              {publishedProducts.has(String(product.id)) && (
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 w-fit">
-                  Published{" "}
-                  {product.publishedAt
-                    ? `(${new Date(product.publishedAt).toLocaleString()})`
-                    : ""}
-                </span>
-              )}
+              {pendingDescriptions[product.id] &&
+                !publishedProducts.has(String(product.id)) && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-fit">
+                    📝 Pending Changes
+                  </span>
+                )}
+              {pendingDescriptions[product.id] &&
+                publishedProducts.has(String(product.id)) && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 w-fit">
+                    ✅ Published (with pending content)
+                  </span>
+                )}
+              {!pendingDescriptions[product.id] &&
+                publishedProducts.has(String(product.id)) && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 w-fit">
+                    ✅ Published{" "}
+                    {product.publishedAt
+                      ? `(${new Date(product.publishedAt).toLocaleString()})`
+                      : ""}
+                  </span>
+                )}
             </div>
           </div>
         </TableCell>
@@ -2478,7 +2734,9 @@ ${newDescription}`
                 setIsCompareOpen(true);
               }}
             >
-              View Changes
+              {publishedProducts.has(String(product.id))
+                ? "View Published Content"
+                : "View Changes"}
             </Button>
           ) : (
             <Button
@@ -2528,6 +2786,12 @@ ${newDescription}`
                 <strong>Displayed:</strong>{" "}
                 {filteredProducts.length.toLocaleString()} (after filters)
               </span>
+              {isPendingDataLoading && (
+                <span className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                  <span className="animate-spin">⟳</span>
+                  <span>Loading pending content status...</span>
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {hasMore && (

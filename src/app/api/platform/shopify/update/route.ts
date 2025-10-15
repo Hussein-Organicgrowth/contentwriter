@@ -54,6 +54,13 @@ interface UpdatePayload {
   summaryHtml?: string;
 }
 
+interface ShopifyMetafield {
+  namespace: string;
+  key: string;
+  value: string;
+  type: string;
+}
+
 function buildProductGid(numericId: string) {
   return `gid://shopify/Product/${numericId}`;
 }
@@ -418,6 +425,9 @@ export async function POST(req: Request) {
       id: productGid,
     };
 
+    // Declare metafieldConfig in broader scope for use in preservation logic
+    let metafieldConfig: ShopifyMetafield | null = null;
+
     if (descriptionPlacement.mode === "body_html") {
       console.log("[DEBUG] Setting descriptionHtml directly");
       input.descriptionHtml = description;
@@ -432,14 +442,24 @@ export async function POST(req: Request) {
         descriptionPlacement.metafieldType
       );
 
-      const metafieldConfig = {
-        namespace: descriptionPlacement.metafieldNamespace,
-        key: descriptionPlacement.metafieldKey,
+      // Ensure namespace and key are defined (should always be true due to normalizeDescriptionPlacement)
+      const namespace = descriptionPlacement.metafieldNamespace || "";
+      const key = descriptionPlacement.metafieldKey || "";
+
+      if (!namespace || !key) {
+        console.error("[DEBUG] Missing namespace or key for metafield mode");
+        return NextResponse.json(
+          { error: "Metafield namespace and key are required" },
+          { status: 400 }
+        );
+      }
+
+      metafieldConfig = {
+        namespace,
+        key,
         type: shopifyMetafieldType,
         value: metafieldValue,
       };
-
-      input.metafields = [metafieldConfig];
 
       console.log("[DEBUG] Metafield configuration:", {
         ...metafieldConfig,
@@ -468,6 +488,92 @@ export async function POST(req: Request) {
     if (Object.keys(seoInput).length > 0) {
       input.seo = seoInput;
       console.log("[DEBUG] SEO fields:", seoInput);
+    }
+
+    // If using metafield mode, we need to preserve existing metafields
+    if (descriptionPlacement.mode === "metafield") {
+      console.log("[DEBUG] Fetching existing metafields to preserve them...");
+
+      const getMetafieldsQuery = `
+        query GetProductMetafields($id: ID!) {
+          product(id: $id) {
+            metafields(first: 250) {
+              edges {
+                node {
+                  namespace
+                  key
+                  value
+                  type
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const metafieldsResponse = await fetch(
+        `https://${formattedStoreName}/admin/api/2024-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "X-Shopify-Access-Token": accessToken,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            query: getMetafieldsQuery,
+            variables: {
+              id: productGid,
+            },
+          }),
+        }
+      );
+
+      if (!metafieldsResponse.ok) {
+        const errorText = await metafieldsResponse.text();
+        console.error(
+          "[DEBUG] Failed to fetch existing metafields:",
+          errorText
+        );
+        throw new Error(
+          `Failed to fetch existing metafields: status ${metafieldsResponse.status} - ${errorText}`
+        );
+      }
+
+      const metafieldsJson = await metafieldsResponse.json();
+      const existingMetafields: ShopifyMetafield[] =
+        metafieldsJson?.data?.product?.metafields?.edges?.map(
+          (edge: { node: ShopifyMetafield }) => edge.node
+        ) || [];
+
+      console.log(
+        "[DEBUG] Found existing metafields:",
+        existingMetafields.length
+      );
+
+      // Filter out the metafield we're updating and preserve the rest
+      const preservedMetafields = existingMetafields.filter(
+        (mf: ShopifyMetafield) =>
+          mf.namespace !== descriptionPlacement.metafieldNamespace ||
+          mf.key !== descriptionPlacement.metafieldKey
+      );
+
+      console.log("[DEBUG] Preserving metafields:", preservedMetafields.length);
+
+      // Combine preserved metafields with the new/updated one
+      if (metafieldConfig) {
+        const allMetafields: ShopifyMetafield[] = [
+          ...preservedMetafields,
+          metafieldConfig,
+        ];
+        input.metafields = allMetafields;
+        console.log("[DEBUG] Final metafields count:", allMetafields.length);
+      } else {
+        console.warn(
+          "[DEBUG] metafieldConfig is null, only using preserved metafields"
+        );
+        input.metafields = preservedMetafields;
+      }
     }
 
     console.log("[DEBUG] Final input object:", JSON.stringify(input, null, 2));

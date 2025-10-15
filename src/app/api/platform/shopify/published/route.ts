@@ -72,10 +72,12 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const company = searchParams.get("company");
     const productId = searchParams.get("productId");
+    const productIds = searchParams.get("productIds");
 
     console.log("GET /api/platform/shopify/published - Request params:", {
       company,
       productId,
+      productIds,
     });
 
     if (!company) {
@@ -102,12 +104,29 @@ export async function GET(req: Request) {
       return NextResponse.json({ publishedProduct });
     }
 
-    // Get all published products for this website
-    const publishedProducts = await PublishedProductDescription.find({
+    // Build query object for published products
+    const query: {
+      websiteName: string;
+      isActive: boolean;
+      productId?: { $in: string[] };
+    } = {
       websiteName: company,
       isActive: true,
-    })
+    };
+
+    // If productIds are provided, filter by them for better performance
+    if (productIds) {
+      const ids = productIds.split(",").filter((id) => id.trim());
+      if (ids.length > 0) {
+        query.productId = { $in: ids };
+      }
+    }
+
+    // Get published products for this website (filtered by productIds if provided)
+    const publishedProducts = await PublishedProductDescription.find(query)
       .select("productId publishedAt")
+      .sort({ publishedAt: -1 }) // Most recent first
+      .limit(1000) // Hard limit to prevent excessive data transfer
       .lean();
 
     console.log(

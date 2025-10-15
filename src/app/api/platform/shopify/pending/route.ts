@@ -146,6 +146,13 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const company = searchParams.get("company");
     const productId = searchParams.get("productId");
+    const productIds = searchParams.get("productIds");
+
+    console.log(
+      `GET /api/platform/shopify/pending for ${company}, productIds: ${
+        productIds ? productIds.split(",").length : 0
+      }`
+    );
 
     if (!company) {
       return NextResponse.json(
@@ -171,15 +178,52 @@ export async function GET(req: Request) {
       return NextResponse.json({ pendingDescription });
     }
 
-    // Get all active pending descriptions for this website
-    const pendingDescriptions = await PendingProductDescription.find({
+    // Build query object for pending descriptions
+    const query: {
+      websiteName: string;
+      isActive: boolean;
+      productId?: { $in: string[] };
+    } = {
       websiteName: company,
       isActive: true,
-    })
+    };
+
+    // If productIds are provided, filter by them for better performance
+    if (productIds) {
+      const ids = productIds.split(",").filter((id) => id.trim());
+      console.log("Filtering pending by productIds:", ids.length, "IDs");
+      console.log("First few product IDs:", ids.slice(0, 3));
+      if (ids.length > 0) {
+        query.productId = { $in: ids };
+      }
+    } else {
+      console.log("No productIds provided, fetching all pending for company");
+    }
+
+    // Get active pending descriptions for this website (filtered by productIds if provided)
+    console.log("Final MongoDB query:", JSON.stringify(query, null, 2));
+    const queryStart = Date.now();
+    const pendingDescriptions = await PendingProductDescription.find(query)
       .select(
         "productId oldDescription newDescription oldSeoTitle oldSeoDescription newSeoTitle newSeoDescription summaryHtml generatedAt"
       )
+      .sort({ generatedAt: -1 }) // Most recent first
+      .limit(1000) // Hard limit to prevent excessive data transfer
       .lean();
+
+    const queryEnd = Date.now();
+    console.log(
+      `Found ${
+        pendingDescriptions.length
+      } pending descriptions for ${company} in ${queryEnd - queryStart}ms`
+    );
+
+    if (pendingDescriptions.length > 0) {
+      console.log(
+        "Sample product IDs from database:",
+        pendingDescriptions.slice(0, 3).map((p) => p.productId)
+      );
+    }
 
     // Transform to match the expected format
     const formattedDescriptions = pendingDescriptions.map((desc) => ({

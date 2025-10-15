@@ -45,7 +45,21 @@ const pendingProductDescriptionSchema = new Schema<IPendingProductDescription>(
 // Compound indexes for efficient queries
 pendingProductDescriptionSchema.index({ websiteName: 1, productId: 1 });
 pendingProductDescriptionSchema.index({ websiteName: 1, isActive: 1 });
-pendingProductDescriptionSchema.index({ generatedAt: -1 });
+pendingProductDescriptionSchema.index({
+  websiteName: 1,
+  isActive: 1,
+  productId: 1,
+});
+pendingProductDescriptionSchema.index({
+  websiteName: 1,
+  productId: 1,
+  isActive: 1,
+}); // Optimized for specific product lookups with active status
+pendingProductDescriptionSchema.index({
+  websiteName: 1,
+  isActive: 1,
+  generatedAt: -1,
+}); // For sorting recent pending items
 
 const publishedProductDescriptionSchema =
   new Schema<IPublishedProductDescription>(
@@ -70,7 +84,16 @@ publishedProductDescriptionSchema.index(
   { websiteName: 1, productId: 1 },
   { unique: true }
 );
-publishedProductDescriptionSchema.index({ publishedAt: -1 });
+publishedProductDescriptionSchema.index({
+  websiteName: 1,
+  isActive: 1,
+  productId: 1,
+});
+publishedProductDescriptionSchema.index({
+  websiteName: 1,
+  isActive: 1,
+  publishedAt: -1,
+}); // For sorting recent published items
 
 export const PendingProductDescription =
   models.PendingProductDescription ||

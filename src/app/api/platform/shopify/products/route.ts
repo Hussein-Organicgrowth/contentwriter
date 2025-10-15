@@ -251,6 +251,14 @@ async function fetchProductsBatch(
 
   const data = (await response.json()) as GraphQLResponse;
 
+  console.log("GraphQL Response debug:", {
+    hasErrors: !!data.errors,
+    errors: data.errors,
+    hasData: !!data.data,
+    productsCount: data.data?.products?.edges?.length || 0,
+    pageInfo: data.data?.products?.pageInfo,
+  });
+
   if (data.errors) {
     throw new Error(`GraphQL Error: ${JSON.stringify(data.errors)}`);
   }
@@ -264,8 +272,9 @@ async function fetchProductsBatch(
     images: edge.node.images.edges.map((img) => ({
       src: img.node.url,
     })),
-    seoTitle: (edge.node as any).seo?.title || "",
-    seoDescription: (edge.node as any).seo?.description || "",
+    seoTitle: (edge.node as { seo?: { title?: string } }).seo?.title || "",
+    seoDescription:
+      (edge.node as { seo?: { description?: string } }).seo?.description || "",
   }));
 
   console.log("Fetched products batch:", {
@@ -283,53 +292,23 @@ async function fetchProductsBatch(
 async function fetchProductsInParallel(
   storeName: string,
   accessToken: string,
-  cursor: string | null,
-  batchCount: number = 1
+  cursor: string | null
 ): Promise<{
   products: ShopifyProduct[];
   pageInfo: PageInfo;
   totalFetched: number;
 }> {
-  // For large stores, fetch multiple batches in parallel
-  const promises: Promise<{
-    products: ShopifyProduct[];
-    pageInfo: PageInfo;
-  }>[] = [];
-  const currentCursor = cursor;
+  // For now, simplify to single batch fetching to avoid complexity
+  // The parallel logic was causing issues and Shopify's cursor-based pagination
+  // doesn't really benefit from parallel requests for subsequent pages
+  console.log("Fetching products batch with cursor:", cursor);
 
-  // Create first batch promise
-  promises.push(fetchProductsBatch(storeName, accessToken, currentCursor));
-
-  // If we want multiple batches and this isn't the first load, prepare parallel requests
-  if (batchCount > 1 && cursor) {
-    // For subsequent loads, we can only do sequential due to cursor-based pagination
-    // But we can optimize by increasing the batch size
-    const result = await fetchProductsBatch(storeName, accessToken, cursor);
-    return {
-      products: result.products,
-      pageInfo: result.pageInfo,
-      totalFetched: result.products.length,
-    };
-  }
-
-  // Execute the batch(es)
-  const results = await Promise.all(promises);
-
-  // Combine results
-  const allProducts: ShopifyProduct[] = [];
-  let finalPageInfo: PageInfo = { hasNextPage: false, endCursor: null };
-
-  for (const result of results) {
-    allProducts.push(...result.products);
-    if (result.pageInfo.hasNextPage) {
-      finalPageInfo = result.pageInfo;
-    }
-  }
+  const result = await fetchProductsBatch(storeName, accessToken, cursor);
 
   return {
-    products: allProducts,
-    pageInfo: finalPageInfo,
-    totalFetched: allProducts.length,
+    products: result.products,
+    pageInfo: result.pageInfo,
+    totalFetched: result.products.length,
   };
 }
 
@@ -400,16 +379,11 @@ export async function GET(request: Request) {
 
     const { count: totalProducts } = await countResponse.json();
 
-    // Determine batch count based on store size and whether this is initial load
-    const isInitialLoad = !cursor;
-    const batchCount = isInitialLoad && totalProducts > 1000 ? 2 : 1;
-
-    // Fetch products using optimized processing
+    // Fetch products using single batch processing
     const { products, pageInfo, totalFetched } = await fetchProductsInParallel(
       storeName,
       accessToken,
-      cursor,
-      batchCount
+      cursor
     );
 
     // Calculate cumulative progress if cursor is provided
@@ -430,6 +404,17 @@ export async function GET(request: Request) {
         percentage: Math.min(100, (currentProgress / totalProducts) * 100),
       },
     };
+
+    console.log("API Response debug:", {
+      company,
+      cursor,
+      productsCount: products.length,
+      totalProducts,
+      hasNextPage: pageInfo.hasNextPage,
+      endCursor: pageInfo.endCursor,
+      currentProgress,
+      responseSize: JSON.stringify(response).length,
+    });
 
     // Cache the response
     setCachedData(company, cursor, response);
