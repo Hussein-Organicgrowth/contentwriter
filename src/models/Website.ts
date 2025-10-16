@@ -294,5 +294,10 @@ const websiteSchema = new mongoose.Schema({
   productDescriptionsMigratedAt: { type: Date },
 });
 
+websiteSchema.index(
+  { name: 1, "content.status": 1 },
+  { name: "website_content_status_by_name" }
+);
+
 export const Website =
   models.Website || model<IWebsite>("Website", websiteSchema);
