@@ -56,6 +56,10 @@ pendingProductDescriptionSchema.index({
   isActive: 1,
 }); // Optimized for specific product lookups with active status
 pendingProductDescriptionSchema.index({
+  productId: 1,
+  isActive: 1,
+});
+pendingProductDescriptionSchema.index({
   websiteName: 1,
   isActive: 1,
   generatedAt: -1,
@@ -72,7 +76,7 @@ const publishedProductDescriptionSchema =
         default: Date.now,
         index: true,
       },
-      isActive: { type: Boolean, default: true },
+      isActive: { type: Boolean, default: true, index: true },
     },
     {
       timestamps: true,
@@ -88,6 +92,10 @@ publishedProductDescriptionSchema.index({
   websiteName: 1,
   isActive: 1,
   productId: 1,
+});
+publishedProductDescriptionSchema.index({
+  productId: 1,
+  isActive: 1,
 });
 publishedProductDescriptionSchema.index({
   websiteName: 1,
