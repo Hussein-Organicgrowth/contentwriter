@@ -60,6 +60,10 @@ pendingProductDescriptionSchema.index({
   isActive: 1,
   generatedAt: -1,
 }); // For sorting recent pending items
+pendingProductDescriptionSchema.index(
+  { productId: 1, isActive: 1 },
+  { name: "pending_productId_isActive" }
+);
 
 const publishedProductDescriptionSchema =
   new Schema<IPublishedProductDescription>(
@@ -94,6 +98,10 @@ publishedProductDescriptionSchema.index({
   isActive: 1,
   publishedAt: -1,
 }); // For sorting recent published items
+publishedProductDescriptionSchema.index(
+  { productId: 1, isActive: 1 },
+  { name: "published_productId_isActive" }
+);
 
 export const PendingProductDescription =
   models.PendingProductDescription ||
