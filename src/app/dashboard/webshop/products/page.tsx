@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -231,6 +231,21 @@ export default function ProductsPage() {
   const [publishedProducts, setPublishedProducts] = useState<Set<string>>(
     new Set()
   );
+
+  // Calculate valid products that can be generated for (no pending or published)
+  const validProductsCount = useMemo(() => {
+    return filteredProducts.filter(
+      (p) =>
+        selectedProducts.has(p.id) &&
+        !pendingDescriptions[p.id] &&
+        !publishedProducts.has(String(p.id))
+    ).length;
+  }, [
+    filteredProducts,
+    selectedProducts,
+    pendingDescriptions,
+    publishedProducts,
+  ]);
   const [showPublishedOnly, setShowPublishedOnly] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<ShopifyProduct | null>(
     null
@@ -1303,9 +1318,24 @@ ${newDescription}`
       return;
     }
 
+    // Filter out products that already have pending descriptions or are published
+    const validProducts = filteredProducts.filter(
+      (p) =>
+        selectedProducts.has(p.id) &&
+        !pendingDescriptions[p.id] &&
+        !publishedProducts.has(String(p.id))
+    );
+
+    if (validProducts.length === 0) {
+      toast.error(
+        "Selected products already have pending content or are published. Please select products without existing content."
+      );
+      return;
+    }
+
     const CONCURRENT_LIMIT = 8; // Process 8 products at a time for optimal speed
     setIsBulkGenerating(true);
-    setBulkProgress({ current: 0, total: selectedProducts.size });
+    setBulkProgress({ current: 0, total: validProducts.length });
     let successCount = 0;
     let failCount = 0;
     const updatedPendingDescriptions = { ...pendingDescriptions };
@@ -1321,17 +1351,13 @@ ${newDescription}`
     };
 
     try {
-      const selectedProductsList = filteredProducts.filter((p) =>
-        selectedProducts.has(p.id)
-      );
-
       console.log(
-        `[Bulk Generate] Starting generation for ${selectedProductsList.length} products with concurrency ${CONCURRENT_LIMIT}`
+        `[Bulk Generate] Starting generation for ${validProducts.length} products with concurrency ${CONCURRENT_LIMIT}`
       );
 
-      // Set all selected products to generating state
+      // Set valid products to generating state
       const newGeneratingState = { ...isGenerating };
-      selectedProductsList.forEach((product) => {
+      validProducts.forEach((product) => {
         newGeneratingState[product.id] = true;
       });
       setIsGenerating(newGeneratingState);
@@ -1431,8 +1457,8 @@ ${newDescription}`
       };
 
       // Process in batches with concurrency limit
-      for (let i = 0; i < selectedProductsList.length; i += CONCURRENT_LIMIT) {
-        const batch = selectedProductsList.slice(i, i + CONCURRENT_LIMIT);
+      for (let i = 0; i < validProducts.length; i += CONCURRENT_LIMIT) {
+        const batch = validProducts.slice(i, i + CONCURRENT_LIMIT);
         const batchResults = await Promise.allSettled(
           batch.map((product, idx) => processProduct(product, i + idx))
         );
@@ -3411,7 +3437,11 @@ ${newDescription}`
               <Button
                 variant="default"
                 onClick={handleBulkGenerate}
-                disabled={selectedProducts.size === 0 || isBulkGenerating}
+                disabled={
+                  selectedProducts.size === 0 ||
+                  isBulkGenerating ||
+                  validProductsCount === 0
+                }
               >
                 {isBulkGenerating ? (
                   <>
@@ -3423,7 +3453,7 @@ ${newDescription}`
                     %)
                   </>
                 ) : (
-                  <>✨ Generate Content ({selectedProducts.size})</>
+                  <>✨ Generate Content ({validProductsCount})</>
                 )}
               </Button>
               <Button
